@@ -52,6 +52,10 @@ export default function Portfolio() {
       <div style={{ display: "flex", gap: 8, marginBottom: 12 }}>
         <button onClick={load} style={{ padding: "8px 12px" }}>Refresh</button>
         <button onClick={exportCsv} style={{ padding: "8px 12px" }}>Export CSV</button>
+        <button
+          onClick={async ()=>{ await fetch((process.env.NEXT_PUBLIC_BACKEND_URL || "") + "/squareoff/all", { method: "POST" }); load(); }}
+          style={{ padding: "8px 12px" }}
+        >Exit All</button>
       </div>
       <table style={{ width: "100%", borderCollapse: "collapse" }}>
         <thead>
@@ -71,6 +75,12 @@ export default function Portfolio() {
               <td style={{ textAlign: "right" }}>{Number(p.avg_price || 0).toFixed(2)}</td>
               <td style={{ textAlign: "right" }}>{Number(p.ltp || 0).toFixed(2)}</td>
               <td style={{ textAlign: "right", color: (p.unrealized || 0) >= 0 ? "#0a0" : "#a00" }}>{Number(p.unrealized || 0).toFixed(2)}</td>
+              <td style={{ textAlign: "center" }}>
+                <button
+                  onClick={async ()=>{ await fetch((process.env.NEXT_PUBLIC_BACKEND_URL || "") + "/squareoff", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ symbol: p.symbol }) }); load(); }}
+                  style={{ padding: "4px 8px" }}
+                >Exit</button>
+              </td>
             </tr>
           ))}
         </tbody>

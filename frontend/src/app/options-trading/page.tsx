@@ -15,6 +15,8 @@ export default function OptionsTrading() {
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [qty, setQty] = useState<number>(1);
   const [offset, setOffset] = useState<number>(0);
+  const [selectedRows, setSelectedRows] = useState<string[]>([]);
+  const [prices, setPrices] = useState<Record<string, number>>({});
 
   const loadExpiries = async () => {
     const data = await (await fetch(`${backendUrl}/options/expiries?underlying=${under}`)).json();
@@ -35,7 +37,29 @@ export default function OptionsTrading() {
     const s = new Set(selected);
     if (s.has(sym)) s.delete(sym); else s.add(sym);
     setSelected(s);
+    setSelectedRows(Array.from(s));
   };
+
+  const refreshLtp = async () => {
+    try {
+      const syms = [...(ce || []).map((x) => x.tradingsymbol), ...(pe || []).map((x) => x.tradingsymbol)];
+      if (!syms.length) return;
+      const url = new URL(`${backendUrl}/ltp`);
+      url.searchParams.set("symbols", syms.join(","));
+      url.searchParams.set("exchange", "NFO");
+      const data = await (await fetch(url.toString())).json();
+      const map: Record<string, number> = {};
+      Object.entries(data || {}).forEach(([k, v]) => { map[String(k)] = Number(v || 0); });
+      setPrices(map);
+    } catch {}
+  };
+
+  useEffect(() => { if (ce.length || pe.length) { refreshLtp(); } }, [ce, pe, exp]);
+  useEffect(() => {
+    if (!(ce.length || pe.length)) return;
+    const id = setInterval(refreshLtp, 5000);
+    return () => clearInterval(id);
+  }, [ce, pe]);
 
   const addToWatchlist = async () => {
     const list = Array.from(selected);
@@ -68,6 +92,7 @@ export default function OptionsTrading() {
         </select>
         <input type="number" value={count} onChange={(e) => setCount(Number(e.target.value || 10))} style={{ width: 100, padding: 6 }} />
         <button className="btn btn-primary" onClick={loadChain}>Load</button>
+        <button className="btn" onClick={refreshLtp}>Refresh LTP</button>
         <input type="number" value={qty} onChange={(e) => setQty(Number(e.target.value || 1))} style={{ width: 100, padding: 6 }} />
         <button className="btn btn-success" onClick={() => placeOrders("BUY")}>BUY</button>
         <button className="btn btn-danger" onClick={() => placeOrders("SELL")}>SELL</button>
@@ -83,6 +108,13 @@ export default function OptionsTrading() {
           await fetch((process.env.NEXT_PUBLIC_BACKEND_URL || "") + "/options/atm_trade", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
           alert("ATM SELL placed (paper/live based on mode)");
         }}>ATM SELL</button>
+        <button className="btn" onClick={async ()=>{
+          if (!selectedRows.length) return;
+          for (const sym of selectedRows) {
+            await fetch((process.env.NEXT_PUBLIC_BACKEND_URL || "") + "/order", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ symbol: sym, exchange: "NFO", side: "SELL", quantity: qty }) });
+          }
+          alert("Exit SELL sent for selected");
+        }}>Exit Selected</button>
       </div>
       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
         <div className="card">
@@ -92,6 +124,7 @@ export default function OptionsTrading() {
               <tr>
                 <th style={{ textAlign: "right" }}>Strike</th>
                 <th>Symbol</th>
+                <th style={{ textAlign: "right" }}>LTP</th>
                 <th style={{ textAlign: "center" }}>Select</th>
               </tr>
             </thead>
@@ -100,6 +133,7 @@ export default function OptionsTrading() {
                 <tr key={r.tradingsymbol}>
                   <td style={{ textAlign: "right" }}>{Number(r.strike).toFixed(2)}</td>
                   <td>{r.tradingsymbol}</td>
+                  <td style={{ textAlign: "right" }}>{Number(prices[r.tradingsymbol] || 0).toFixed(2)}</td>
                   <td style={{ textAlign: "center" }}>
                     <input type="checkbox" checked={selected.has(r.tradingsymbol)} onChange={() => toggle(r.tradingsymbol)} />
                   </td>
@@ -115,6 +149,7 @@ export default function OptionsTrading() {
               <tr>
                 <th style={{ textAlign: "right" }}>Strike</th>
                 <th>Symbol</th>
+                <th style={{ textAlign: "right" }}>LTP</th>
                 <th style={{ textAlign: "center" }}>Select</th>
               </tr>
             </thead>
@@ -123,6 +158,7 @@ export default function OptionsTrading() {
                 <tr key={r.tradingsymbol}>
                   <td style={{ textAlign: "right" }}>{Number(r.strike).toFixed(2)}</td>
                   <td>{r.tradingsymbol}</td>
+                  <td style={{ textAlign: "right" }}>{Number(prices[r.tradingsymbol] || 0).toFixed(2)}</td>
                   <td style={{ textAlign: "center" }}>
                     <input type="checkbox" checked={selected.has(r.tradingsymbol)} onChange={() => toggle(r.tradingsymbol)} />
                   </td>

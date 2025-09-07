@@ -24,6 +24,7 @@ export default function OrdersPage() {
   const [query, setQuery] = useState<string>("");
   const [demat, setDemat] = useState<any[]>([]);
   const [resetCash, setResetCash] = useState<string>("");
+  const [strategyStats, setStrategyStats] = useState<any>({});
 
   const load = async () => {
     setLoading(true);
@@ -109,6 +110,13 @@ export default function OrdersPage() {
     load();
   };
 
+  const loadStrategyStats = async () => {
+    try {
+      const s = await (await fetch(backendUrl + "/reports/strategy")).json();
+      setStrategyStats(s || {});
+    } catch { setStrategyStats({}); }
+  };
+
   return (
     <main style={{ maxWidth: 1000, margin: "20px auto", fontFamily: "sans-serif" }}>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
@@ -144,6 +152,7 @@ export default function OrdersPage() {
         <input placeholder="Reset cash" value={resetCash} onChange={(e)=>setResetCash(e.target.value)} style={{ width: 120, padding: 6 }} />
         <button onClick={resetPaper} style={{ padding: "6px 10px" }}>Reset Paper</button>
         <button onClick={loadDemat} style={{ padding: "6px 10px" }}>Load Demat Orders</button>
+        <button onClick={loadStrategyStats} style={{ padding: "6px 10px" }}>Strategy Report</button>
       </div>
 
       <table style={{ width: "100%", borderCollapse: "collapse" }}>
@@ -200,6 +209,20 @@ export default function OrdersPage() {
                   <td>{o.status}</td>
                   <td>{o.order_timestamp || o.exchange_timestamp}</td>
                 </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+
+      {Object.keys(strategyStats).length > 0 && (
+        <div style={{ marginTop: 24 }}>
+          <h3>Strategy Profit Report</h3>
+          <table style={{ width: "100%", borderCollapse: "collapse" }}>
+            <thead><tr><th>Strategy</th><th style={{ textAlign: "right" }}>Trades</th><th style={{ textAlign: "right" }}>Buy Amt</th><th style={{ textAlign: "right" }}>Sell Amt</th><th style={{ textAlign: "right" }}>Profit</th></tr></thead>
+            <tbody>
+              {Object.entries(strategyStats).map(([name, v]: any) => (
+                <tr key={name}><td>{name}</td><td style={{ textAlign: "right" }}>{v.trades}</td><td style={{ textAlign: "right" }}>{Number(v.buy).toFixed(2)}</td><td style={{ textAlign: "right" }}>{Number(v.sell).toFixed(2)}</td><td style={{ textAlign: "right", color: Number(v.profit) >= 0 ? "#0a0" : "#a00" }}>{Number(v.profit).toFixed(2)}</td></tr>
               ))}
             </tbody>
           </table>

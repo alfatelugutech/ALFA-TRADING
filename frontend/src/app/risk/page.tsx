@@ -8,6 +8,7 @@ export default function Risk() {
   const [sl, setSl] = useState<number>(2);
   const [tp, setTp] = useState<number>(0);
   const [auto, setAuto] = useState<boolean>(false);
+  const [trail, setTrail] = useState<number>(0);
   const [msg, setMsg] = useState<string>("");
 
   const load = async () => {
@@ -16,6 +17,7 @@ export default function Risk() {
       setSl(Number((data.sl_pct || 0.02) * 100));
       setTp(Number((data.tp_pct || 0) * 100));
       setAuto(!!data.auto_close);
+      setTrail(Number((data.trailing_stop_pct || 0) * 100));
     } catch {}
   };
 
@@ -28,7 +30,7 @@ export default function Risk() {
     await fetch(backendUrl + "/risk", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ sl_pct: sl / 100, tp_pct: tp / 100, auto_close: auto }),
+      body: JSON.stringify({ sl_pct: sl / 100, tp_pct: tp / 100, auto_close: auto, trailing_stop_pct: trail / 100 }),
     });
     setMsg("Saved.");
   };
@@ -47,6 +49,10 @@ export default function Risk() {
         </div>
         <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
           <input type="checkbox" checked={auto} onChange={(e) => setAuto(e.target.checked)} /> Auto Close
+        </div>
+        <div>
+          <label>Trailing Stop %</label>
+          <input type="number" value={trail} onChange={(e) => setTrail(Number(e.target.value || 0))} style={{ width: "100%", padding: 8 }} />
         </div>
       </div>
       <div style={{ marginTop: 12 }}>
