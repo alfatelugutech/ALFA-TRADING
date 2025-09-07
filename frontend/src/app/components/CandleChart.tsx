@@ -37,7 +37,36 @@ export default function CandleChart({ symbol, exchange = "NSE" }: { symbol: stri
 
   const w = 600;
   const h = 260;
-  const barW = Math.max(2, Math.floor((w - 40) / Math.max(1, candles.length)));
+  const rightAxis = 50; // reserved for price labels
+  const leftPad = 20;
+  const barW = Math.max(2, Math.floor(((w - rightAxis) - leftPad) / Math.max(1, candles.length)));
+
+  const lastPrice = candles.length ? candles[candles.length - 1].close : undefined;
+  const denom = Math.max(1, max - min);
+  const yTicks = useMemo(() => {
+    const ticks = 4;
+    const arr: { y: number; val: number }[] = [];
+    for (let i = 0; i <= ticks; i++) {
+      const val = min + (denom * (i / ticks));
+      arr.push({ y: scaleY(val), val });
+    }
+    return arr;
+  }, [min, max]);
+
+  const xTicks = useMemo(() => {
+    const labels: { x: number; label: string }[] = [];
+    if (!candles.length) return labels;
+    const count = Math.min(6, candles.length);
+    const step = Math.max(1, Math.floor(candles.length / count));
+    for (let i = 0; i < candles.length; i += step) {
+      const c = candles[i];
+      const d = new Date(c.time);
+      const label = interval === "day" ? d.toLocaleDateString() : d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+      const x = leftPad + i * barW + Math.floor(barW / 2);
+      labels.push({ x, label });
+    }
+    return labels;
+  }, [candles, interval]);
 
   return (
     <div className="card">
@@ -55,8 +84,20 @@ export default function CandleChart({ symbol, exchange = "NSE" }: { symbol: stri
         </select>
       </div>
       <svg viewBox={`0 0 ${w} ${h}`} preserveAspectRatio="none" style={{ width: "100%", height: h }}>
+        {/* Baseline when no data */}
+        {candles.length === 0 && (
+          <text x={w/2} y={h/2} textAnchor="middle" fill="var(--muted)" fontSize="12">No candles (check auth/market hours)</text>
+        )}
+        {/* Price axis on right */}
+        {yTicks.map((t, idx) => (
+          <g key={`yt-${idx}`}>
+            <line x1={leftPad} x2={w - rightAxis} y1={t.y} y2={t.y} stroke="rgba(255,255,255,.05)" />
+            <text x={w - 6} y={t.y + 4} textAnchor="end" fill="var(--muted)" fontSize="10">{t.val.toFixed(2)}</text>
+          </g>
+        ))}
+        {/* Candles */}
         {candles.map((c, i) => {
-          const x = 20 + i * barW + Math.floor(barW / 2);
+          const x = leftPad + i * barW + Math.floor(barW / 2);
           const color = c.close >= c.open ? "#22c55e" : "#ef4444";
           return (
             <g key={i}>
@@ -65,6 +106,18 @@ export default function CandleChart({ symbol, exchange = "NSE" }: { symbol: stri
             </g>
           );
         })}
+        {/* Last price marker */}
+        {lastPrice !== undefined && (
+          <g>
+            <line x1={leftPad} x2={w - rightAxis} y1={scaleY(lastPrice)} y2={scaleY(lastPrice)} stroke="#60a5fa" strokeDasharray="4 4" />
+            <rect x={w - rightAxis + 4} y={scaleY(lastPrice) - 10} width={rightAxis - 8} height={20} fill="#1f2937" stroke="#60a5fa" />
+            <text x={w - 8} y={scaleY(lastPrice) + 5} textAnchor="end" fill="#60a5fa" fontSize={12}>{lastPrice.toFixed(2)}</text>
+          </g>
+        )}
+        {/* Time axis */}
+        {xTicks.map((t, idx) => (
+          <text key={`xt-${idx}`} x={t.x} y={h - 4} textAnchor="middle" fill="var(--muted)" fontSize="10">{t.label}</text>
+        ))}
         <rect x={0} y={0} width={w} height={h} fill="transparent" stroke="rgba(255,255,255,.06)" />
       </svg>
     </div>
