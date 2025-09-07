@@ -114,6 +114,10 @@ risk_sl_pct: float = 0.02  # 2% stop-loss
 risk_tp_pct: float = 0.0   # optional take-profit
 risk_auto_close: bool = False
 
+# Paper trading account (virtual money)
+paper_start_cash = float(os.getenv("PAPER_STARTING_CASH", "1000000") or 1000000)
+paper_account: Dict[str, float] = {"starting_cash": paper_start_cash, "cash": paper_start_cash}
+
 # Auto-schedule
 schedule_cfg: Dict[str, object] = {
     "enabled": False,
@@ -411,6 +415,16 @@ def _record_order(symbol: str, exchange: str, side: str, quantity: int, price: f
         "dry_run": dry_run,
         "source": source,
     })
+    # Adjust virtual cash for paper trades
+    try:
+        if dry_run:
+            cost = float(price) * int(quantity)
+            if side == "BUY":
+                paper_account["cash"] = float(paper_account.get("cash", 0.0)) - cost
+            elif side == "SELL":
+                paper_account["cash"] = float(paper_account.get("cash", 0.0)) + cost
+    except Exception:
+        logger.exception("paper cash adjust failed")
 
 
 def _get_holdings() -> Dict[str, dict]:
@@ -427,6 +441,37 @@ def _get_holdings() -> Dict[str, dict]:
         if s["quantity"] <= 0:
             s["avg_price"] = 0.0
     return holdings
+
+
+def _get_holdings_paper_only() -> Dict[str, dict]:
+    holdings: Dict[str, dict] = {}
+    for o in order_log:
+        if not o.get("dry_run"):
+            continue
+        qty = o["quantity"] if o["side"] == "BUY" else -o["quantity"]
+        s = holdings.setdefault(o["symbol"], {"quantity": 0, "avg_price": 0.0})
+        new_qty = s["quantity"] + qty
+        if new_qty > 0 and qty > 0:
+            s["avg_price"] = (s["avg_price"] * s["quantity"] + o["price"] * qty) / max(new_qty, 1)
+        s["quantity"] = new_qty
+        if s["quantity"] <= 0:
+            s["avg_price"] = 0.0
+    return holdings
+
+
+def _paper_equity_and_unrealized() -> Dict[str, float]:
+    eq = 0.0
+    unreal = 0.0
+    holds = _get_holdings_paper_only()
+    for sym, h in holds.items():
+        qty = int(h.get("quantity", 0))
+        if qty <= 0:
+            continue
+        avg = float(h.get("avg_price", 0.0))
+        ltp = _get_ltp_for_symbol(strategy_exchange, sym)
+        eq += ltp * qty
+        unreal += (ltp - avg) * qty
+    return {"equity": round(eq, 2), "unrealized": round(unreal, 2)}
 
 
 def _square_off(symbol: str, quantity: int, reason: str = "") -> None:
@@ -659,7 +704,7 @@ class ScheduleBody(BaseModel):
 
 @app.get("/schedule")
 def get_schedule():
-    return {"config": schedule_cfg, "state": _schedule_state}
+    return {"config": schedule_cfg, "state": _schedule_state, "paper": {"starting_cash": paper_account.get("starting_cash", 0.0), "cash": paper_account.get("cash", 0.0)}}
 
 
 @app.post("/schedule")
@@ -692,7 +737,10 @@ def positions():
         ltp = _get_ltp_for_symbol(strategy_exchange, sym)
         pnl_u = (ltp - avg) * qty
         out.append({"symbol": sym, "quantity": qty, "avg_price": round(avg, 2), "ltp": round(ltp, 2), "unrealized": round(pnl_u, 2)})
-    return out
+    # include paper account summary row (as meta)
+    paper = _paper_equity_and_unrealized()
+    meta = {"paper_cash": round(float(paper_account.get("cash", 0.0)), 2), "paper_equity": paper.get("equity", 0.0), "paper_unrealized": paper.get("unrealized", 0.0)}
+    return {"positions": out, "paper": meta}
 
 
 _expiries_cache: Dict[str, dict] = {}
@@ -736,7 +784,23 @@ def options_chain(underlying: str, expiry: str, count: int = 10, around: float |
     try:
         global instruments
         u = (underlying or "").upper()
-        items = [i for i in instruments if i.exchange in {"NFO", "BFO"} and (i.name or "").upper() == u and (i.expiry or "") == expiry and i.instrument_type in {"CE", "PE"}]
+        exp_param = (expiry or "").strip()
+        items_all = [i for i in instruments if i.exchange in {"NFO", "BFO"} and (i.name or "").upper() == u and i.instrument_type in {"CE", "PE"}]
+        # support alias 'next' to choose nearest upcoming expiry
+        if exp_param.lower() == "next" or exp_param == "":
+            try:
+                from datetime import date
+                today = date.today().isoformat()
+                exps = sorted({i.expiry for i in items_all if i.expiry})
+                exp_choice = None
+                for e in exps:
+                    if e >= today:
+                        exp_choice = e
+                        break
+                exp_param = exp_choice or (exps[0] if exps else "")
+            except Exception:
+                pass
+        items = [i for i in items_all if (i.expiry or "") == exp_param]
         if not items:
             # attempt refresh
             try:
@@ -749,7 +813,8 @@ def options_chain(underlying: str, expiry: str, count: int = 10, around: float |
                         writer.writeheader()
                         writer.writerows(data_ins)
                     instruments = load_instruments(str(csv_path))
-                    items = [i for i in instruments if i.exchange in {"NFO", "BFO"} and (i.name or "").upper() == u and (i.expiry or "") == expiry and i.instrument_type in {"CE", "PE"}]
+                    items_all = [i for i in instruments if i.exchange in {"NFO", "BFO"} and (i.name or "").upper() == u and i.instrument_type in {"CE", "PE"}]
+                    items = [i for i in items_all if (i.expiry or "") == exp_param]
             except Exception:
                 logger.exception("refresh instruments for chain failed")
             if not items:
@@ -787,12 +852,18 @@ def status_all():
         auth = True
     except Exception:
         auth = False
+    paper = _paper_equity_and_unrealized()
     return {
         "health": "ok",
         "auth": auth,
         "dry_run": cfg.dry_run,
         "orders": len(order_log),
         "subscriptions": len(symbol_to_token),
+        "paper": {
+            "cash": round(float(paper_account.get("cash", 0.0)), 2),
+            "equity": paper.get("equity", 0.0),
+            "unrealized": paper.get("unrealized", 0.0),
+        },
         "strategy": {
             "active": strategy_active,
             "live": strategy_live,
@@ -811,5 +882,35 @@ def set_dry_run(req: DryRunRequest):
     cfg.dry_run = bool(req.value)
     logger.info("DRY_RUN set to %s", cfg.dry_run)
     return {"dry_run": cfg.dry_run}
+
+
+class PaperResetBody(BaseModel):
+    cash: Optional[float] = None
+    clear_orders: Optional[bool] = True
+
+
+@app.post("/paper/reset")
+def paper_reset(body: PaperResetBody):
+    global paper_account, order_log
+    try:
+        new_cash = float(body.cash) if body.cash is not None else float(paper_account.get("starting_cash", 0.0))
+    except Exception:
+        new_cash = float(paper_account.get("starting_cash", 0.0))
+    paper_account["starting_cash"] = new_cash
+    paper_account["cash"] = new_cash
+    if bool(body.clear_orders):
+        order_log = [o for o in order_log if not o.get("dry_run")]
+    logger.info("Paper account reset: cash=%.2f clear=%s", new_cash, bool(body.clear_orders))
+    return {"cash": round(new_cash, 2), "cleared": bool(body.clear_orders)}
+
+
+@app.get("/broker/orders")
+def broker_orders():
+    try:
+        data = broker.kite.orders()
+        return data or []
+    except Exception as e:
+        logger.exception("broker orders failed")
+        return {"error": str(e)}
 
 
