@@ -285,6 +285,23 @@ export default function Home() {
         </button>
         <button
           onClick={async () => {
+            const short = Number(prompt("Short EMA", "12") || 12);
+            const long = Number(prompt("Long EMA", "26") || 26);
+            const live = confirm("Live trading? OK for Live, Cancel for Paper");
+            const list = watchlist.length ? watchlist : symbols.split(/\s+/).filter(Boolean);
+            await fetch(backendUrl + "/strategy/ema/start", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ symbols: list, exchange, short, long, live }),
+            });
+            pushToast(`EMA started (${short}/${long}) ${live ? "LIVE" : "PAPER"}`, "success");
+          }}
+          style={{ padding: "8px 12px" }}
+        >
+          Start EMA
+        </button>
+        <button
+          onClick={async () => {
             await fetch(backendUrl + "/strategy/stop", { method: "POST" });
             pushToast("Strategy stopped", "success");
           }}
@@ -369,6 +386,22 @@ export default function Home() {
           style={{ padding: "8px 12px" }}
         >
           Show Last Orders
+        </button>
+        <button
+          onClick={async () => {
+            const sl = Number(prompt("Stop-loss % (e.g., 2 for 2%)", "2") || 2) / 100;
+            const tp = Number(prompt("Take-profit % (optional)", "0") || 0) / 100;
+            const auto = confirm("Enable auto close? OK=yes, Cancel=no");
+            await fetch(backendUrl + "/risk", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ sl_pct: sl, tp_pct: tp, auto_close: auto }),
+            });
+            pushToast("Risk settings updated", "success");
+          }}
+          style={{ padding: "8px 12px" }}
+        >
+          Risk Settings
         </button>
       </div>
 
