@@ -129,6 +129,11 @@ def health():
 def subscribe(req: SubscribeRequest):
     global symbol_to_token, token_to_symbol
     mode_full = (req.mode or "ltp").lower() == "full"
+    # Validate token by fetching profile; if invalid, ask client to login
+    try:
+        broker.kite.profile()
+    except Exception:
+        return {"error": "NOT_AUTHENTICATED", "message": "Login required. Use /auth/login_url then /auth/exchange."}
     ensure_ticker(mode_full=mode_full)
     mapping = resolve_tokens_by_symbols(instruments, req.symbols, exchange=req.exchange)
     if not mapping:
