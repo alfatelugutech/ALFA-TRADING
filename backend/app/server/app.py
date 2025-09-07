@@ -123,6 +123,9 @@ paper_risk_per_trade_pct: float = float(os.getenv("PAPER_RISK_PER_TRADE_PCT", "0
 ai_active: bool = False
 ai_trade_capital: float = float(os.getenv("AI_TRADE_CAPITAL", "10000") or 10000)
 ai_risk_pct: float = float(os.getenv("AI_RISK_PCT", "0.01") or 0.01)
+ai_default_symbols: List[str] = [s.strip().upper() for s in (os.getenv("AI_DEFAULT_SYMBOLS", "TCS INFY RELIANCE") or "").split()] if os.getenv("AI_DEFAULT_SYMBOLS", "TCS INFY RELIANCE") else []
+ai_options_underlyings: List[str] = [s.strip().upper() for s in (os.getenv("AI_OPTIONS_UNDERLYINGS", "NIFTY BANKNIFTY") or "").split()] if os.getenv("AI_OPTIONS_UNDERLYINGS", "NIFTY BANKNIFTY") else []
+ai_options_qty: int = int(os.getenv("AI_OPTIONS_QTY", "1") or 1)
 
 # Auto-schedule
 schedule_cfg: Dict[str, object] = {
@@ -524,9 +527,12 @@ def strategy_sma_start(req: SmaStartRequest):
     except Exception:
         return {"error": "NOT_AUTHENTICATED"}
     # Resolve symbols and subscribe
-    mapping = resolve_tokens_by_symbols(instruments, req.symbols, exchange=req.exchange)
+    syms = req.symbols or []
+    if not syms:
+        syms = ai_default_symbols
+    mapping = resolve_tokens_by_symbols(instruments, syms, exchange=req.exchange)
     if not mapping:
-        return {"error": "SYMBOLS_NOT_FOUND", "symbols": req.symbols}
+        return {"error": "SYMBOLS_NOT_FOUND", "symbols": syms}
     symbol_to_token.update(mapping)
     token_to_symbol.update({v: k for k, v in mapping.items()})
     ensure_ticker(mode_full=False)
@@ -572,9 +578,12 @@ def strategy_ema_start(req: EmaStartRequest):
         broker.kite.profile()
     except Exception:
         return {"error": "NOT_AUTHENTICATED"}
-    mapping = resolve_tokens_by_symbols(instruments, req.symbols, exchange=req.exchange)
+    syms = req.symbols or []
+    if not syms:
+        syms = ai_default_symbols
+    mapping = resolve_tokens_by_symbols(instruments, syms, exchange=req.exchange)
     if not mapping:
-        return {"error": "SYMBOLS_NOT_FOUND", "symbols": req.symbols}
+        return {"error": "SYMBOLS_NOT_FOUND", "symbols": syms}
     symbol_to_token.update(mapping)
     token_to_symbol.update({v: k for k, v in mapping.items()})
     ensure_ticker(mode_full=False)
@@ -941,6 +950,75 @@ def ai_config(body: AiConfigBody):
     ai_risk_pct = float(body.risk_pct)
     logger.info("AI config updated: active=%s cap=%.2f risk=%.4f", ai_active, ai_trade_capital, ai_risk_pct)
     return {"active": ai_active, "trade_capital": ai_trade_capital, "risk_pct": ai_risk_pct}
+
+
+class AiStartBody(BaseModel):
+    strategy: Optional[str] = "sma"  # sma|ema
+    exchange: Optional[str] = "NSE"
+    short: Optional[int] = 20
+    long: Optional[int] = 50
+    live: Optional[bool] = False
+
+
+@app.post("/ai/start")
+def ai_start(body: AiStartBody):
+    # Use default AI symbols if none were scheduled
+    req = SmaStartRequest(symbols=ai_default_symbols, exchange=body.exchange or "NSE", short=body.short or 20, long=body.long or 50, live=bool(body.live))
+    if (body.strategy or "sma").lower() == "ema":
+        return strategy_ema_start(EmaStartRequest(symbols=ai_default_symbols, exchange=req.exchange, short=req.short, long=req.long, live=req.live))
+    return strategy_sma_start(req)
+
+
+class OptionsAtmTradeBody(BaseModel):
+    underlying: str
+    expiry: str = "next"  # YYYY-MM-DD or "next"
+    side: str  # BUY or SELL
+    quantity: int = 1
+    offset: int = 0  # 0=ATM; >0 farther OTM
+    count: int = 50
+
+
+@app.post("/options/atm_trade")
+def options_atm_trade(body: OptionsAtmTradeBody):
+    """Place ATM straddle/strangle orders for options. If dry_run=True, records paper orders only."""
+    try:
+        chain = options_chain(body.underlying, body.expiry, count=max(20, body.count), around=None)
+        strikes = chain.get("strikes", [])
+        ce = chain.get("ce", [])
+        pe = chain.get("pe", [])
+        if not strikes or not ce or not pe:
+            return {"error": "No chain data"}
+        # Choose median strike as ATM approximation
+        mid = strikes[len(strikes)//2]
+        # Find closest CE/PE by strike
+        ce_sorted = sorted(ce, key=lambda x: abs(float(x.get("strike", 0)) - mid))
+        pe_sorted = sorted(pe, key=lambda x: abs(float(x.get("strike", 0)) - mid))
+        ce_idx = min(len(ce_sorted)-1, max(0, body.offset))
+        pe_idx = min(len(pe_sorted)-1, max(0, body.offset))
+        ce_pick = ce_sorted[ce_idx]
+        pe_pick = pe_sorted[pe_idx]
+        side = body.side.upper()
+        placed = []
+        for sym in [ce_pick.get("tradingsymbol"), pe_pick.get("tradingsymbol")]:
+            if not sym:
+                continue
+            if cfg.dry_run:
+                price = _get_ltp_for_symbol("NFO", sym)
+                _record_order(sym, "NFO", side, int(body.quantity), price, True, source="atm")
+                placed.append({"symbol": sym, "price": price, "dry_run": True})
+            else:
+                txn = broker.kite.TRANSACTION_TYPE_BUY if side == "BUY" else broker.kite.TRANSACTION_TYPE_SELL
+                try:
+                    broker.place_market_order(tradingsymbol=sym, exchange="NFO", quantity=int(body.quantity), transaction_type=txn)
+                    price = _get_ltp_for_symbol("NFO", sym)
+                    _record_order(sym, "NFO", side, int(body.quantity), price, False, source="atm")
+                    placed.append({"symbol": sym, "price": price, "dry_run": False})
+                except Exception as e:
+                    logger.exception("atm order failed for %s", sym)
+        return {"placed": placed, "ce": ce_pick, "pe": pe_pick}
+    except Exception as e:
+        logger.exception("options_atm_trade error")
+        return {"error": str(e)}
 
 
 @app.get("/broker/orders")
