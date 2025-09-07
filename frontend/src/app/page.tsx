@@ -653,6 +653,15 @@ export default function Home() {
           <button onClick={async () => setPositions(await (await fetch(backendUrl + "/positions")).json())} style={{ padding: "6px 10px" }}>Refresh Positions</button>
           <button onClick={async () => setPnlState(await (await fetch(backendUrl + "/pnl")).json())} style={{ padding: "6px 10px" }}>Refresh PnL</button>
           <button
+            onClick={async () => {
+              await fetch(backendUrl + "/squareoff/all", { method: "POST" });
+              pushToast("Exit All triggered", "success");
+            }}
+            style={{ padding: "6px 10px" }}
+          >
+            Exit All
+          </button>
+          <button
             onClick={() => {
               if (!positions.length) { pushToast("No positions to export", "info"); return; }
               const header = ["symbol","quantity","avg_price","ltp","unrealized"];
@@ -702,6 +711,17 @@ export default function Home() {
                 <td style={{ textAlign: "right" }}>{p.avg_price.toFixed(2)}</td>
                 <td style={{ textAlign: "right" }}>{p.ltp.toFixed(2)}</td>
                 <td style={{ textAlign: "right", color: p.unrealized >= 0 ? "#0a0" : "#a00" }}>{p.unrealized.toFixed(2)}</td>
+                <td style={{ textAlign: "center" }}>
+                  <button
+                    onClick={async () => {
+                      await fetch(backendUrl + "/squareoff", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ symbol: p.symbol }) });
+                      pushToast(`Exited ${p.symbol}`, "success");
+                    }}
+                    style={{ padding: "4px 8px" }}
+                  >
+                    Exit
+                  </button>
+                </td>
               </tr>
             ))}
           </tbody>
