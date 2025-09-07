@@ -1,0 +1,13 @@
+kiteconnect>=4.2.0,<6.0.0
+websocket-client>=1.7.0
+pandas>=2.0.0
+numpy>=1.24.0
+python-dotenv>=1.0.0
+tenacity>=8.2.3
+pyotp>=2.9.0
+fastapi>=0.111.0
+uvicorn[standard]>=0.30.0
+orjson>=3.10.0
+pydantic>=2.7.0
+
+

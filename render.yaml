@@ -1,0 +1,29 @@
+services:
+  - type: web
+    name: zerodha-auto-backend
+    env: python
+    region: oregon
+    plan: free
+    rootDir: backend
+    buildCommand: "pip install -r requirements.txt"
+    startCommand: "uvicorn app.server.app:app --host 0.0.0.0 --port 10000"
+    autoDeploy: true
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.11.9
+      - key: LOG_LEVEL
+        value: INFO
+      - key: DRY_RUN
+        value: "true"
+      - key: INSTRUMENTS_CSV_PATH
+        value: data/instruments.csv
+      # Set secrets in Render Dashboard for these keys:
+      - key: ZERODHA_API_KEY
+        sync: false
+      - key: ZERODHA_API_SECRET
+        sync: false
+      - key: ZERODHA_USER_ID
+        sync: false
+      - key: ACCESS_TOKEN
+        sync: false
+
