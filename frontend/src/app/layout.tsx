@@ -26,26 +26,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
             </div>
           </nav>
         </header>
-        <div className="shell">
-          <aside className="sidebar">
-            <a className="navlink" href="/">Dashboard</a>
-            <a className="navlink" href="/strategy-builder">Strategy Builder</a>
-            <a className="navlink" href="/backtesting">Backtesting</a>
-            <a className="navlink" href="/live-trading">Live Trading</a>
-            <a className="navlink" href="/portfolio">Portfolio</a>
-            <a className="navlink" href="/risk">Risk Management</a>
-            <a className="navlink" href="/market-data">Market Data</a>
-            <a className="navlink" href="/research">Research Lab</a>
-            <a className="navlink" href="/optimization">Optimization</a>
-            <a className="navlink" href="/alerts">Alerts & Signals</a>
-            <a className="navlink" href="/analytics">Analytics</a>
-            <a className="navlink" href="/paper-trading">Paper Trading</a>
-            <a className="navlink" href="/options-trading">Options Trading</a>
-            <a className="navlink" href="/trade-reports">Trade Reports</a>
-            <a className="navlink" href="/settings">Settings</a>
-          </aside>
-          <section className="content">{children}</section>
-        </div>
+        <div style={{ maxWidth: 1000, margin: "0 auto", padding: "0 12px 24px" }}>{children}</div>
       </body>
     </html>
   );
