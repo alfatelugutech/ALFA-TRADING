@@ -350,6 +350,28 @@ export default function Home() {
         <tbody>{rows}</tbody>
       </table>
 
+      <div style={{ marginTop: 16, display: "flex", gap: 8 }}>
+        <button
+          onClick={async () => {
+            const data = await (await fetch(backendUrl + "/pnl")).json();
+            pushToast(`PnL → Realized: ${data.realized}, Unrealized: ${data.unrealized}`, "info");
+          }}
+          style={{ padding: "8px 12px" }}
+        >
+          Refresh PnL
+        </button>
+        <button
+          onClick={async () => {
+            const data = await (await fetch(backendUrl + "/orders")).json();
+            const last = data.slice(-5).map((o: any) => `${o.side} ${o.symbol} @ ${o.price}`).join(" | ");
+            pushToast(last || "No orders yet", "info");
+          }}
+          style={{ padding: "8px 12px" }}
+        >
+          Show Last Orders
+        </button>
+      </div>
+
       <div style={{ position: "fixed", top: 16, right: 16, display: "flex", flexDirection: "column", gap: 8 }}>
         {toasts.map((t) => (
           <div
