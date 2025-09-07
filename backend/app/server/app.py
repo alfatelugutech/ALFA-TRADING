@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import asyncio
+import csv
 import logging
+from pathlib import Path
 from typing import Dict, List, Optional
 
 import orjson
@@ -38,7 +40,32 @@ cfg = get_config()
 setup_logging(cfg.log_level)
 
 broker = ZerodhaClient(api_key=cfg.zerodha_api_key, api_secret=cfg.zerodha_api_secret, access_token=cfg.access_token)
-instruments = load_instruments(cfg.instruments_csv_path)
+
+
+def _load_or_download_instruments() -> list:
+    csv_path = Path(cfg.instruments_csv_path)
+    try:
+        return load_instruments(str(csv_path))
+    except FileNotFoundError:
+        logger.warning("Instruments CSV missing at %s. Attempting to download...", csv_path)
+        try:
+            data = broker.instruments()
+            if not data:
+                logger.error("Broker returned no instruments. Skipping write.")
+                return []
+            csv_path.parent.mkdir(parents=True, exist_ok=True)
+            with csv_path.open("w", newline="", encoding="utf-8") as f:
+                writer = csv.DictWriter(f, fieldnames=data[0].keys())
+                writer.writeheader()
+                writer.writerows(data)
+            logger.info("Instruments downloaded: %s entries", len(data))
+            return load_instruments(str(csv_path))
+        except Exception:
+            logger.exception("Failed to download instruments. Continuing with empty list.")
+            return []
+
+
+instruments = _load_or_download_instruments()
 
 latest_ticks: Dict[int, dict] = {}
 symbol_to_token: Dict[str, int] = {}
