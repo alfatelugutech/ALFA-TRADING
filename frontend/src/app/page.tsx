@@ -11,6 +11,27 @@ type Tick = {
   updated_at?: number;
 };
 
+type OrderRec = {
+  ts: number;
+  symbol: string;
+  exchange: string;
+  side: string;
+  quantity: number;
+  price: number;
+  dry_run: boolean;
+  source: string;
+};
+
+type PositionRec = {
+  symbol: string;
+  quantity: number;
+  avg_price: number;
+  ltp: number;
+  unrealized: number;
+};
+
+type ChainRec = { tradingsymbol: string; strike: number; instrument_token: number; type: string };
+
 const backendUrl = process.env.NEXT_PUBLIC_BACKEND_URL || "http://localhost:10000";
 
 export default function Home() {
@@ -27,6 +48,14 @@ export default function Home() {
   const [wsConnected, setWsConnected] = useState<boolean>(false);
   const [dark, setDark] = useState<boolean>(false);
   const [toasts, setToasts] = useState<{ id: number; text: string; kind: "info" | "success" | "error" }[]>([]);
+  const [orders, setOrders] = useState<OrderRec[]>([]);
+  const [positions, setPositions] = useState<PositionRec[]>([]);
+  const [pnlState, setPnlState] = useState<{ realized: number; unrealized: number } | null>(null);
+  const [optUnder, setOptUnder] = useState<string>("NIFTY");
+  const [optExp, setOptExp] = useState<string>("");
+  const [optCount, setOptCount] = useState<number>(10);
+  const [expiries, setExpiries] = useState<string[]>([]);
+  const [chain, setChain] = useState<{ ce: ChainRec[]; pe: ChainRec[]; strikes: number[] }>({ ce: [], pe: [], strikes: [] });
 
   useEffect(() => {
     const ws = new WebSocket(backendUrl.replace(/^http/, "ws") + "/ws/ticks");
@@ -422,6 +451,236 @@ export default function Home() {
           </div>
         ))}
       </div>
+
+      {/* Orders & PnL tables */}
+      <section style={{ marginTop: 24 }}>
+        <h3>Orders</h3>
+        <div style={{ display: "flex", gap: 8, marginBottom: 8 }}>
+          <button
+            onClick={async () => {
+              const data = await (await fetch(backendUrl + "/orders")).json();
+              setOrders(data);
+            }}
+            style={{ padding: "6px 10px" }}
+          >
+            Refresh
+          </button>
+        </div>
+        <table style={{ width: "100%", borderCollapse: "collapse" }}>
+          <thead>
+            <tr>
+              <th style={{ textAlign: "left", cursor: "pointer" }} onClick={() => setOrders(orders.slice().sort((a,b)=>a.ts-b.ts))}>Time</th>
+              <th style={{ textAlign: "left" }}>Side</th>
+              <th style={{ textAlign: "left", cursor: "pointer" }} onClick={() => setOrders(orders.slice().sort((a,b)=>a.symbol.localeCompare(b.symbol)))}>Symbol</th>
+              <th style={{ textAlign: "right", cursor: "pointer" }} onClick={() => setOrders(orders.slice().sort((a,b)=>a.quantity-b.quantity))}>Qty</th>
+              <th style={{ textAlign: "right", cursor: "pointer" }} onClick={() => setOrders(orders.slice().sort((a,b)=>a.price-b.price))}>Price</th>
+              <th style={{ textAlign: "center" }}>Mode</th>
+              <th style={{ textAlign: "left" }}>Source</th>
+            </tr>
+          </thead>
+          <tbody>
+            {orders.slice(-100).reverse().map((o) => (
+              <tr key={`${o.ts}-${o.symbol}-${o.side}-${o.price}`}>
+                <td>{new Date(o.ts).toLocaleTimeString()}</td>
+                <td style={{ color: o.side === "BUY" ? "#0a0" : "#a00" }}>{o.side}</td>
+                <td>{o.symbol}</td>
+                <td style={{ textAlign: "right" }}>{o.quantity}</td>
+                <td style={{ textAlign: "right" }}>{o.price.toFixed(2)}</td>
+                <td style={{ textAlign: "center" }}>{o.dry_run ? "PAPER" : "LIVE"}</td>
+                <td>{o.source}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+        <div style={{ marginTop: 6, fontSize: 12 }}>Showing last {Math.min(orders.length, 100)} orders</div>
+      </section>
+
+      <section style={{ marginTop: 24 }}>
+        <h3>Positions & PnL</h3>
+        <div style={{ display: "flex", gap: 8, marginBottom: 8 }}>
+          <button onClick={async () => setPositions(await (await fetch(backendUrl + "/positions")).json())} style={{ padding: "6px 10px" }}>Refresh Positions</button>
+          <button onClick={async () => setPnlState(await (await fetch(backendUrl + "/pnl")).json())} style={{ padding: "6px 10px" }}>Refresh PnL</button>
+          <button
+            onClick={() => {
+              if (!positions.length) { pushToast("No positions to export", "info"); return; }
+              const header = ["symbol","quantity","avg_price","ltp","unrealized"];
+              const rows = positions.map(p => [p.symbol, String(p.quantity), p.avg_price.toFixed(2), p.ltp.toFixed(2), p.unrealized.toFixed(2)]);
+              const csv = [header, ...rows].map(r=>r.map(x=>`"${String(x).replace(/"/g,'""')}"`).join(",")).join("\n");
+              const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
+              const url = URL.createObjectURL(blob);
+              const a = document.createElement("a");
+              a.href = url;
+              a.download = `positions_${Date.now()}.csv`;
+              a.click();
+              URL.revokeObjectURL(url);
+            }}
+            style={{ padding: "6px 10px" }}
+          >
+            Export CSV
+          </button>
+          <button
+            onClick={() => {
+              if (!positions.length) { pushToast("No positions to export", "info"); return; }
+              const rows = positions.map(p => `<tr><td>${p.symbol}</td><td style='text-align:right'>${p.quantity}</td><td style='text-align:right'>${p.avg_price.toFixed(2)}</td><td style='text-align:right'>${p.ltp.toFixed(2)}</td><td style='text-align:right'>${p.unrealized.toFixed(2)}</td></tr>`).join("");
+              const w = window.open("", "_blank");
+              if (!w) return;
+              w.document.write(`<html><head><title>Positions</title></head><body><h3>Positions</h3><table border='1' cellspacing='0' cellpadding='4' style='border-collapse:collapse;width:100%'><thead><tr><th>Symbol</th><th>Qty</th><th>Avg</th><th>LTP</th><th>Unrealized</th></tr></thead><tbody>${rows}</tbody></table><script>window.print();</script></body></html>`);
+              w.document.close();
+            }}
+            style={{ padding: "6px 10px" }}
+          >
+            Export PDF
+          </button>
+        </div>
+        <table style={{ width: "100%", borderCollapse: "collapse" }}>
+          <thead>
+            <tr>
+              <th style={{ textAlign: "left", cursor: "pointer" }} onClick={() => setPositions(positions.slice().sort((a,b)=>a.symbol.localeCompare(b.symbol)))}>Symbol</th>
+              <th style={{ textAlign: "right", cursor: "pointer" }} onClick={() => setPositions(positions.slice().sort((a,b)=>a.quantity-b.quantity))}>Qty</th>
+              <th style={{ textAlign: "right", cursor: "pointer" }} onClick={() => setPositions(positions.slice().sort((a,b)=>a.avg_price-b.avg_price))}>Avg</th>
+              <th style={{ textAlign: "right", cursor: "pointer" }} onClick={() => setPositions(positions.slice().sort((a,b)=>a.ltp-b.ltp))}>LTP</th>
+              <th style={{ textAlign: "right", cursor: "pointer" }} onClick={() => setPositions(positions.slice().sort((a,b)=>a.unrealized-b.unrealized))}>Unrealized</th>
+            </tr>
+          </thead>
+          <tbody>
+            {positions.slice(0, 100).map((p) => (
+              <tr key={p.symbol}>
+                <td>{p.symbol}</td>
+                <td style={{ textAlign: "right" }}>{p.quantity}</td>
+                <td style={{ textAlign: "right" }}>{p.avg_price.toFixed(2)}</td>
+                <td style={{ textAlign: "right" }}>{p.ltp.toFixed(2)}</td>
+                <td style={{ textAlign: "right", color: p.unrealized >= 0 ? "#0a0" : "#a00" }}>{p.unrealized.toFixed(2)}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+        <div style={{ marginTop: 8, fontWeight: 600 }}>
+          {pnlState ? `Realized: ${pnlState.realized.toFixed(2)} | Unrealized: ${pnlState.unrealized.toFixed(2)}` : ""}
+        </div>
+      </section>
+
+      {/* Options Chain */}
+      <section style={{ marginTop: 24 }}>
+        <h3>Options Chain (NFO)</h3>
+        <div style={{ display: "flex", gap: 8, marginBottom: 8 }}>
+          <select value={optUnder} onChange={(e) => setOptUnder(e.target.value)}>
+            <option value="NIFTY">NIFTY</option>
+            <option value="BANKNIFTY">BANKNIFTY</option>
+            <option value="SENSEX">SENSEX</option>
+            <option value="FINNIFTY">FINNIFTY</option>
+          </select>
+          <select value={optExp} onChange={(e) => setOptExp(e.target.value)}>
+            <option value="">Select expiry</option>
+            {expiries.map((e) => (
+              <option key={e} value={e}>{e}</option>
+            ))}
+          </select>
+          <input value={optCount} onChange={(e) => setOptCount(Number(e.target.value || 10))} style={{ width: 80, padding: 6 }} />
+          <button
+            onClick={async () => {
+              if (!optExp) {
+                const exps = await (await fetch(`${backendUrl}/options/expiries?underlying=${optUnder}`)).json();
+                setExpiries(exps);
+              } else {
+                const data = await (await fetch(`${backendUrl}/options/chain?underlying=${optUnder}&expiry=${optExp}&count=${optCount}`)).json();
+                setChain(data);
+              }
+            }}
+            style={{ padding: "6px 10px" }}
+          >
+            Load
+          </button>
+          <button
+            onClick={() => {
+              const list: string[] = [...(chain.ce || []), ...(chain.pe || [])].map((x: any) => x.tradingsymbol);
+              const merged = Array.from(new Set([...(watchlist || []), ...list]));
+              setWatchlist(merged);
+              pushToast(`Added ${list.length} contracts to watchlist`, "success");
+            }}
+            style={{ padding: "6px 10px" }}
+          >
+            Add to Watchlist
+          </button>
+          <button
+            onClick={() => {
+              const rows = [
+                ["type", "strike", "symbol", "instrument_token"],
+                ...([...(chain.ce || []), ...(chain.pe || [])] as any[]).map((r: any) => [
+                  r.type,
+                  String(r.strike),
+                  r.tradingsymbol,
+                  String(r.instrument_token),
+                ]),
+              ];
+              const csv = rows.map(r=>r.map(x=>`"${String(x).replace(/"/g,'""')}"`).join(",")).join("\n");
+              const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
+              const url = URL.createObjectURL(blob);
+              const a = document.createElement("a");
+              a.href = url;
+              a.download = `options_${optUnder}_${optExp || 'exp'}.csv`;
+              a.click();
+              URL.revokeObjectURL(url);
+            }}
+            style={{ padding: "6px 10px" }}
+          >
+            Export CSV
+          </button>
+          <button
+            onClick={() => {
+              const rows = [...(chain.ce || []), ...(chain.pe || [])]
+                .map((r: any) => `<tr><td>${r.type}</td><td style='text-align:right'>${Number(r.strike).toFixed(2)}</td><td>${r.tradingsymbol}</td><td>${r.instrument_token}</td></tr>`) 
+                .join("");
+              const w = window.open("", "_blank");
+              if (!w) return;
+              w.document.write(`<html><head><title>Options ${optUnder} ${optExp}</title></head><body><h3>Options ${optUnder} ${optExp}</h3><table border='1' cellspacing='0' cellpadding='4' style='border-collapse:collapse;width:100%'><thead><tr><th>Type</th><th>Strike</th><th>Symbol</th><th>Token</th></tr></thead><tbody>${rows}</tbody></table><script>window.print();</script></body></html>`);
+              w.document.close();
+            }}
+            style={{ padding: "6px 10px" }}
+          >
+            Export PDF
+          </button>
+        </div>
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+          <div>
+            <h4>Calls (CE)</h4>
+            <table style={{ width: "100%", borderCollapse: "collapse" }}>
+              <thead>
+                <tr>
+                  <th style={{ textAlign: "right" }}>Strike</th>
+                  <th style={{ textAlign: "left" }}>Symbol</th>
+                </tr>
+              </thead>
+              <tbody>
+                {chain.ce.map((r) => (
+                  <tr key={r.tradingsymbol}>
+                    <td style={{ textAlign: "right" }}>{r.strike.toFixed(2)}</td>
+                    <td>{r.tradingsymbol}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+          <div>
+            <h4>Puts (PE)</h4>
+            <table style={{ width: "100%", borderCollapse: "collapse" }}>
+              <thead>
+                <tr>
+                  <th style={{ textAlign: "right" }}>Strike</th>
+                  <th style={{ textAlign: "left" }}>Symbol</th>
+                </tr>
+              </thead>
+              <tbody>
+                {chain.pe.map((r) => (
+                  <tr key={r.tradingsymbol}>
+                    <td style={{ textAlign: "right" }}>{r.strike.toFixed(2)}</td>
+                    <td>{r.tradingsymbol}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </section>
     </main>
   );
 }
