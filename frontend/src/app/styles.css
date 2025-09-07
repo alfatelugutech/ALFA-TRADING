@@ -1,0 +1,58 @@
+:root {
+  --bg: #ffffff;
+  --fg: #0f172a;
+  --muted: #64748b;
+  --card: #f8fafc;
+  --border: #e2e8f0;
+  --primary: #2563eb;
+  --success: #16a34a;
+  --danger: #dc2626;
+  --accent: #7c3aed;
+}
+
+.dark {
+  --bg: #0d1117;
+  --fg: #e6edf3;
+  --muted: #94a3b8;
+  --card: #161b22;
+  --border: #30363d;
+  --primary: #2f81f7;
+  --success: #2ea043;
+  --danger: #f85149;
+  --accent: #a371f7;
+}
+
+.page {
+  background: var(--bg);
+  color: var(--fg);
+}
+
+.card {
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 12px;
+}
+
+.btn {
+  border: 1px solid var(--border);
+  background: var(--card);
+  color: var(--fg);
+  padding: 6px 10px;
+  border-radius: 8px;
+  cursor: pointer;
+}
+.btn:hover { filter: brightness(0.98); }
+.btn-primary { background: var(--primary); color: #fff; border-color: transparent; }
+.btn-danger { background: var(--danger); color: #fff; border-color: transparent; }
+.btn-success { background: var(--success); color: #fff; border-color: transparent; }
+
+.badge { padding: 2px 8px; border-radius: 12px; font-size: 12px; }
+.badge-buy { background: rgba(22,163,74,.15); color: var(--success); }
+.badge-sell { background: rgba(220,38,38,.15); color: var(--danger); }
+
+.table { width: 100%; border-collapse: collapse; }
+.table th, .table td { border-bottom: 1px solid var(--border); padding: 8px; }
+.table tbody tr:nth-child(odd) { background: color-mix(in oklab, var(--card) 70%, var(--bg)); }
+.table tbody tr:hover { background: color-mix(in oklab, var(--card) 85%, var(--bg)); }
+

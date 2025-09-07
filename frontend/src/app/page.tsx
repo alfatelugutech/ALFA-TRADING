@@ -228,17 +228,7 @@ export default function Home() {
   };
 
   return (
-    <main
-      style={{
-        maxWidth: 900,
-        margin: "20px auto",
-        fontFamily: "sans-serif",
-        color: dark ? "#e6edf3" : "#111",
-        background: dark ? "#0d1117" : "#fff",
-        minHeight: "100vh",
-        padding: 12,
-      }}
-    >
+    <main className={dark ? "dark" : ""} style={{ maxWidth: 1000, margin: "20px auto", fontFamily: "system-ui, sans-serif" }}>
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
         <h2>Zerodha Live Ticks</h2>
         <a
@@ -248,7 +238,7 @@ export default function Home() {
           Login with Zerodha
         </a>
       </div>
-      <div style={{ marginBottom: 8 }}>
+      <div className="card" style={{ marginBottom: 8 }}>
         <label style={{ fontSize: 12 }}>
           <input type="checkbox" checked={dark} onChange={(e) => setDark(e.target.checked)} style={{ marginRight: 6 }} />
           Dark mode
@@ -259,7 +249,7 @@ export default function Home() {
           {status.auth ? "Authenticated" : "Not authenticated"} · WS {wsConnected ? "Connected" : "Disconnected"} · Mode {status.dry_run ? "Paper" : "Live"}
         </div>
       )}
-      <div style={{ display: "flex", gap: 12, marginBottom: 12 }}>
+      <div className="card" style={{ display: "flex", gap: 12, marginBottom: 12 }}>
         <select value={exchange} onChange={(e) => setExchange(e.target.value)}>
           <option value="NSE">NSE</option>
           <option value="BSE">BSE</option>
@@ -285,7 +275,7 @@ export default function Home() {
           Snapshot LTP
         </button>
       </div>
-      <div style={{ display: "flex", gap: 12, marginBottom: 12 }}>
+      <div className="card" style={{ display: "flex", gap: 12, marginBottom: 12 }}>
         <input
           value={search}
           onChange={(e) => setSearch(e.target.value)}
@@ -354,7 +344,7 @@ export default function Home() {
         </button>
       </div>
       {results.length > 0 && (
-        <div style={{ marginBottom: 12, fontSize: 14 }}>
+        <div className="card" style={{ marginBottom: 12, fontSize: 14 }}>
           <b>Results:</b>{" "}
           {results.map((r) => (
             <button
@@ -368,7 +358,7 @@ export default function Home() {
         </div>
       )}
       {watchlist.length > 0 && (
-        <div style={{ marginBottom: 12, fontSize: 14 }}>
+        <div className="card" style={{ marginBottom: 12, fontSize: 14 }}>
           <b>Watchlist:</b>{" "}
           {watchlist.map((s) => (
             <span key={s} style={{ border: "1px solid #ccc", padding: "2px 6px", borderRadius: 12, marginRight: 6 }}>
@@ -384,7 +374,7 @@ export default function Home() {
           <button onClick={clearWatchlist} style={{ marginLeft: 6, padding: "4px 8px" }}>Clear</button>
         </div>
       )}
-      <table style={{ width: "100%", borderCollapse: "collapse" }}>
+      <table className="table">
         <thead>
           <tr>
             <th style={{ textAlign: "left" }}>Symbol</th>
@@ -453,7 +443,7 @@ export default function Home() {
       </div>
 
       {/* Orders & PnL tables */}
-      <section style={{ marginTop: 24 }}>
+      <section className="card" style={{ marginTop: 24 }}>
         <h3>Orders</h3>
         <div style={{ display: "flex", gap: 8, marginBottom: 8 }}>
           <button
@@ -466,7 +456,7 @@ export default function Home() {
             Refresh
           </button>
         </div>
-        <table style={{ width: "100%", borderCollapse: "collapse" }}>
+        <table className="table">
           <thead>
             <tr>
               <th style={{ textAlign: "left", cursor: "pointer" }} onClick={() => setOrders(orders.slice().sort((a,b)=>a.ts-b.ts))}>Time</th>
@@ -495,7 +485,7 @@ export default function Home() {
         <div style={{ marginTop: 6, fontSize: 12 }}>Showing last {Math.min(orders.length, 100)} orders</div>
       </section>
 
-      <section style={{ marginTop: 24 }}>
+      <section className="card" style={{ marginTop: 24 }}>
         <h3>Positions & PnL</h3>
         <div style={{ display: "flex", gap: 8, marginBottom: 8 }}>
           <button onClick={async () => setPositions(await (await fetch(backendUrl + "/positions")).json())} style={{ padding: "6px 10px" }}>Refresh Positions</button>
@@ -532,7 +522,7 @@ export default function Home() {
             Export PDF
           </button>
         </div>
-        <table style={{ width: "100%", borderCollapse: "collapse" }}>
+        <table className="table">
           <thead>
             <tr>
               <th style={{ textAlign: "left", cursor: "pointer" }} onClick={() => setPositions(positions.slice().sort((a,b)=>a.symbol.localeCompare(b.symbol)))}>Symbol</th>
@@ -560,7 +550,7 @@ export default function Home() {
       </section>
 
       {/* Options Chain */}
-      <section style={{ marginTop: 24 }}>
+      <section className="card" style={{ marginTop: 24 }}>
         <h3>Options Chain (NFO)</h3>
         <div style={{ display: "flex", gap: 8, marginBottom: 8 }}>
           <select value={optUnder} onChange={(e) => setOptUnder(e.target.value)}>
@@ -643,7 +633,7 @@ export default function Home() {
         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
           <div>
             <h4>Calls (CE)</h4>
-            <table style={{ width: "100%", borderCollapse: "collapse" }}>
+            <table className="table">
               <thead>
                 <tr>
                   <th style={{ textAlign: "right" }}>Strike</th>
@@ -662,7 +652,7 @@ export default function Home() {
           </div>
           <div>
             <h4>Puts (PE)</h4>
-            <table style={{ width: "100%", borderCollapse: "collapse" }}>
+            <table className="table">
               <thead>
                 <tr>
                   <th style={{ textAlign: "right" }}>Strike</th>

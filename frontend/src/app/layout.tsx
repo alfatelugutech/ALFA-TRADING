@@ -3,10 +3,12 @@ export const metadata: { title: string; description: string } = {
   description: "Live market ticks",
 };
 
+import "./styles.css";
+
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
     <html lang="en">
-      <body>{children}</body>
+      <body className="page">{children}</body>
     </html>
   );
 }
