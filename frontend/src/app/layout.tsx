@@ -11,23 +11,36 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
   return (
     <html lang="en">
       <body className="page">
-        <header className="card" style={{ maxWidth: 1000, margin: "12px auto", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-          <div style={{ fontWeight: 700 }}>Zerodha Auto Trader</div>
-          <StatusPill />
-          <nav style={{ display: "flex", gap: 12 }}>
-            <a href="/" style={{ color: "var(--fg)", textDecoration: "none" }}>Dashboard</a>
-            <a href="/options-builder" style={{ color: "var(--fg)", textDecoration: "none" }}>Options Builder</a>
-            <div style={{ position: "relative" }}>
+        <header className="card sticky-top" style={{ maxWidth: 1100, margin: "12px auto", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+            <div style={{ fontWeight: 700 }}>Zerodha Auto Trader</div>
+            <nav className="topnav" style={{ display: "flex", gap: 8 }}>
+              <a href="/">Dashboard</a>
+              <a href="/market-data">Market Data</a>
+              <a href="/options-builder">Options Builder</a>
+              <a href="/options-trading">Options</a>
+              <a href="/portfolio">Portfolio</a>
+              <a href="/orders">Orders</a>
+              <a href="/analytics">Analytics</a>
+            </nav>
+          </div>
+          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+            <div className="dropdown">
               <details>
-                <summary style={{ cursor: "pointer" }}>Trading</summary>
-                <div className="card" style={{ position: "absolute", right: 0, zIndex: 10 }}>
-                  <div><a href="/orders" style={{ color: "var(--fg)", textDecoration: "none" }}>Orders</a></div>
+                <summary>More ▾</summary>
+                <div className="card menu">
+                  <a href="/strategy-builder">Strategy Builder</a>
+                  <a href="/backtesting">Backtesting</a>
+                  <a href="/risk">Risk</a>
+                  <a href="/trade-reports">Reports</a>
+                  <a href="/settings">Settings</a>
                 </div>
               </details>
             </div>
-          </nav>
+            <StatusPill />
+          </div>
         </header>
-        <div style={{ maxWidth: 1000, margin: "0 auto", padding: "0 12px 24px" }}>{children}</div>
+        <div style={{ maxWidth: 1100, margin: "0 auto", padding: "0 12px 24px" }}>{children}</div>
       </body>
     </html>
   );
