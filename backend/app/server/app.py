@@ -701,6 +701,7 @@ _expiries_cache: Dict[str, dict] = {}
 @app.get("/options/expiries")
 def options_expiries(underlying: str):
     try:
+        global instruments
         u = (underlying or "").upper()
         now_ms = int(time.time() * 1000)
         cached = _expiries_cache.get(u)
@@ -718,7 +719,6 @@ def options_expiries(underlying: str):
                         writer = csv.DictWriter(f, fieldnames=data_ins[0].keys())
                         writer.writeheader()
                         writer.writerows(data_ins)
-                    global instruments
                     instruments = load_instruments(str(csv_path))
                     exps = sorted({i.expiry for i in instruments if i.exchange in {"NFO", "BFO"} and (i.name or "").upper() == u and i.instrument_type in {"CE", "PE"} and i.expiry})
             except Exception:
@@ -734,6 +734,7 @@ def options_expiries(underlying: str):
 @app.get("/options/chain")
 def options_chain(underlying: str, expiry: str, count: int = 10, around: float | None = None):
     try:
+        global instruments
         u = (underlying or "").upper()
         items = [i for i in instruments if i.exchange in {"NFO", "BFO"} and (i.name or "").upper() == u and (i.expiry or "") == expiry and i.instrument_type in {"CE", "PE"}]
         if not items:
@@ -747,7 +748,6 @@ def options_chain(underlying: str, expiry: str, count: int = 10, around: float |
                         writer = csv.DictWriter(f, fieldnames=data_ins[0].keys())
                         writer.writeheader()
                         writer.writerows(data_ins)
-                    global instruments
                     instruments = load_instruments(str(csv_path))
                     items = [i for i in instruments if i.exchange in {"NFO", "BFO"} and (i.name or "").upper() == u and (i.expiry or "") == expiry and i.instrument_type in {"CE", "PE"}]
             except Exception:
