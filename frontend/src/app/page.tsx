@@ -16,6 +16,7 @@ export default function Home() {
   const [symbols, setSymbols] = useState<string>("TCS INFY");
   const [ticks, setTicks] = useState<Tick[]>([]);
   const wsRef = useRef<WebSocket | null>(null);
+  const [loginUrl, setLoginUrl] = useState<string>("");
 
   useEffect(() => {
     const ws = new WebSocket(backendUrl.replace(/^http/, "ws") + "/ws/ticks");
@@ -32,6 +33,14 @@ export default function Home() {
       wsRef.current = null;
     };
     return () => ws.close();
+  }, []);
+
+  useEffect(() => {
+    // Prefetch login URL
+    fetch(backendUrl + "/auth/login_url")
+      .then((r) => r.json())
+      .then((d) => setLoginUrl(d.url || ""))
+      .catch(() => {});
   }, []);
 
   const subscribe = async () => {
@@ -60,7 +69,15 @@ export default function Home() {
 
   return (
     <main style={{ maxWidth: 900, margin: "20px auto", fontFamily: "sans-serif" }}>
-      <h2>Zerodha Live Ticks</h2>
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+        <h2>Zerodha Live Ticks</h2>
+        <a
+          href={loginUrl || "#"}
+          style={{ textDecoration: "none", background: "#0969da", color: "#fff", padding: "8px 12px", borderRadius: 6 }}
+        >
+          Login with Zerodha
+        </a>
+      </div>
       <div style={{ display: "flex", gap: 12, marginBottom: 12 }}>
         <input
           value={symbols}
