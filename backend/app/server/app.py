@@ -4,7 +4,7 @@ import asyncio
 import csv
 import logging
 import time
-from datetime import datetime, time as dtime, timezone
+from datetime import datetime, time as dtime, timezone, timedelta
 from zoneinfo import ZoneInfo
 from pathlib import Path
 from typing import Dict, List, Optional
@@ -136,6 +136,7 @@ ai_options_qty: int = int(os.getenv("AI_OPTIONS_QTY", "1") or 1)
 # Trailing stop
 trailing_stop_pct: float = float(os.getenv("TRAILING_STOP_PCT", "0.0") or 0.0)  # 0.02 => 2%
 trailing_state: Dict[str, Dict[str, float]] = {}
+trailing_overrides_pct: Dict[str, float] = {}  # key: EXCHANGE:SYMBOL -> pct
 
 # Auto-schedule
 schedule_cfg: Dict[str, object] = {
@@ -248,11 +249,13 @@ def _on_ticks(ticks: List[dict]) -> None:
                     _square_off(sym, qty, reason="TP")
                 # Trailing stop for longs
                 try:
-                    if trailing_stop_pct > 0:
-                        k = f"{strategy_exchange}:{sym}"
+                    # choose per-symbol override if set
+                    k = f"{strategy_exchange}:{sym}"
+                    pct = float(trailing_overrides_pct.get(k, trailing_stop_pct))
+                    if pct > 0:
                         st = trailing_state.setdefault(k, {"max": ltp, "min": ltp})
                         st["max"] = max(st["max"], ltp)
-                        trail = st["max"] * (1.0 - trailing_stop_pct)
+                        trail = st["max"] * (1.0 - pct)
                         if ltp <= trail:
                             _square_off(sym, qty, reason="TRAIL")
                 except Exception:
@@ -461,6 +464,89 @@ def ltp(symbols: str, exchange: str = "NSE"):
         else:
             out[sym] = 0.0
     return out
+
+
+@app.get("/quote")
+def quote(keys: str):
+    """Generic quote endpoint that supports full keys like 'NSE:NIFTY 50'.
+    Returns a simple { key: last_price } map.
+    """
+    try:
+        broker.kite.profile()
+    except Exception:
+        return {"error": "NOT_AUTHENTICATED"}
+    items = [k.strip() for k in (keys or "").split(",") if k.strip()]
+    if not items:
+        return {}
+
+
+@app.get("/history")
+def history(symbol: Optional[str] = None, exchange: str = "NSE", interval: str = "minute", count: int = 180, key: Optional[str] = None):
+    """Fetch recent historical candles for a symbol or full key.
+    - interval: minute, 3minute, 5minute, 10minute, 15minute, 30minute, 60minute, day
+    - count: number of candles to fetch (approx)
+    """
+    try:
+        broker.kite.profile()
+    except Exception:
+        return {"error": "NOT_AUTHENTICATED"}
+    try:
+        ex = exchange
+        sym = (symbol or "").upper().strip()
+        if key and ":" in key:
+            parts = key.split(":", 1)
+            ex = parts[0].upper()
+            sym = parts[1].upper()
+        mapping = resolve_tokens_by_symbols(instruments, [sym], exchange=ex)
+        token = mapping.get(sym)
+        if not token:
+            return {"candles": []}
+        tz = ZoneInfo("Asia/Kolkata")
+        now = datetime.now(tz)
+        # Estimate period
+        step_minutes = {
+            "minute": 1,
+            "3minute": 3,
+            "5minute": 5,
+            "10minute": 10,
+            "15minute": 15,
+            "30minute": 30,
+            "60minute": 60,
+            "day": 60 * 24,
+        }.get(interval, 1)
+        delta = timedelta(minutes=max(1, step_minutes) * max(1, int(count)))
+        start = now - delta
+        data = broker.kite.historical_data(token, start, now, interval)
+        candles = []
+        for row in data or []:
+            # row has: date, open, high, low, close, volume
+            try:
+                ts = row.get("date")
+                tiso = ts.isoformat() if hasattr(ts, "isoformat") else str(ts)
+                candles.append({
+                    "time": tiso,
+                    "open": float(row.get("open", 0)),
+                    "high": float(row.get("high", 0)),
+                    "low": float(row.get("low", 0)),
+                    "close": float(row.get("close", 0)),
+                    "volume": int(row.get("volume", 0)),
+                })
+            except Exception:
+                continue
+        return {"candles": candles}
+    except Exception:
+        logger.exception("history failed")
+        return {"candles": []}
+    try:
+        data = broker.kite.quote(items)
+        out = {}
+        for k in items:
+            v = data.get(k) or {}
+            out[k] = float(v.get("last_price") or v.get("last_traded_price") or v.get("ltp") or 0)
+        return out
+    except Exception:
+        logger.exception("quote failed")
+        return {}
 
 
 def _get_ltp_for_symbol(exchange: str, symbol: str) -> float:
@@ -763,6 +849,12 @@ class RiskConfig(BaseModel):
     trailing_stop_pct: float = 0.0
 
 
+class TrailingOverrideBody(BaseModel):
+    symbol: str
+    exchange: str = "NSE"
+    pct: float
+
+
 @app.get("/risk")
 def get_risk():
     return {"sl_pct": risk_sl_pct, "tp_pct": risk_tp_pct, "auto_close": risk_auto_close, "trailing_stop_pct": trailing_stop_pct}
@@ -778,6 +870,16 @@ def set_risk(cfg_req: RiskConfig):
     trailing_stop_pct = float(cfg_req.trailing_stop_pct)
     logger.info("Risk updated sl=%.4f tp=%.4f auto=%s", risk_sl_pct, risk_tp_pct, risk_auto_close)
     return get_risk()
+
+
+@app.post("/risk/trailing/override")
+def set_trailing_override(body: TrailingOverrideBody):
+    k = f"{body.exchange.upper()}:{body.symbol.upper()}"
+    if body.pct <= 0:
+        trailing_overrides_pct.pop(k, None)
+    else:
+        trailing_overrides_pct[k] = float(body.pct)
+    return {"overrides": trailing_overrides_pct}
 
 
 def _parse_hhmm(value: str) -> dtime:

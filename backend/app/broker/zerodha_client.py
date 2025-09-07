@@ -57,7 +57,21 @@ class ZerodhaClient:
         return {"order_id": order_id}
 
     def get_ltp(self, instruments: Dict[str, str]) -> Dict[str, Any]:
-        return self._kite.ltp(instruments)
+        try:
+            return self._kite.ltp(instruments)
+        except Exception:
+            # fallback to quote if ltp missing for some derivatives
+            try:
+                keys = list(instruments.keys())
+                data = self._kite.quote(keys)
+                # normalize to ltp-like shape
+                out: Dict[str, Any] = {}
+                for k, v in (data or {}).items():
+                    last = v.get("last_price") or v.get("last_traded_price") or 0
+                    out[k] = {"last_price": last}
+                return out
+            except Exception:
+                return {}
 
     def instruments(self, exchange: Optional[str] = None):
         return self._kite.instruments(exchange)
