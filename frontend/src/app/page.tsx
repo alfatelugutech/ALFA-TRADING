@@ -69,6 +69,7 @@ export default function Home() {
   const [aiActive, setAiActive] = useState<boolean>(false);
   const [aiCapital, setAiCapital] = useState<number>(10000);
   const [aiRisk, setAiRisk] = useState<number>(1);
+  const [isPaper, setIsPaper] = useState<boolean>(true);
 
   useEffect(() => {
     const ws = new WebSocket(backendUrl.replace(/^http/, "ws") + "/ws/ticks");
@@ -124,6 +125,7 @@ export default function Home() {
           setAiCapital(Number(d.ai.trade_capital || 10000));
           setAiRisk(Number((d.ai.risk_pct || 0.01) * 100));
         }
+        if (typeof d?.dry_run === "boolean") setIsPaper(!!d.dry_run);
       }).catch(()=>{});
   }, []);
 
@@ -632,6 +634,16 @@ export default function Home() {
             await fetch(backendUrl + "/strategy/stop", { method: "POST" });
             pushToast("AI trading stopped", "success");
           }}>Stop AI</button>
+        </div>
+      </section>
+
+      {/* Trading Mode Switch */}
+      <section className="card" style={{ marginTop: 24 }}>
+        <h3>Trading Mode</h3>
+        <div style={{ marginBottom: 8 }}>Current: <b>{isPaper ? "Paper" : "Live"}</b></div>
+        <div style={{ display: "flex", gap: 8 }}>
+          <button className="btn" onClick={async ()=>{ await fetch(backendUrl + "/config/dry_run", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ value: true }) }); setIsPaper(true); pushToast("Switched to Paper", "success");}}>Switch to Paper</button>
+          <button className="btn btn-danger" onClick={async ()=>{ await fetch(backendUrl + "/config/dry_run", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ value: false }) }); setIsPaper(false); pushToast("Switched to Live", "success");}}>Switch to Live</button>
         </div>
       </section>
 
