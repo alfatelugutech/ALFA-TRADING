@@ -69,3 +69,22 @@ def resolve_tokens_by_symbols(
     return mapping
 
 
+def search_symbols(
+    instruments: List[Instrument], query: str, exchange: Optional[str] = None, limit: int = 20
+) -> List[Instrument]:
+    q = (query or "").strip().upper()
+    if not q:
+        return []
+    results: List[Instrument] = []
+    for inst in instruments:
+        if exchange and inst.exchange.upper() != exchange.upper():
+            continue
+        sym = inst.tradingsymbol.upper()
+        name = (inst.name or "").upper()
+        if q in sym or q in name:
+            results.append(inst)
+            if len(results) >= limit:
+                break
+    return results
+
+

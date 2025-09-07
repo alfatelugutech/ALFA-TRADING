@@ -15,7 +15,7 @@ from app.config import get_config
 from app.logging_setup import setup_logging
 from app.broker.zerodha_client import ZerodhaClient
 from app.market.ticker import MarketTicker
-from app.utils.symbols import load_instruments, resolve_tokens_by_symbols
+from app.utils.symbols import load_instruments, resolve_tokens_by_symbols, search_symbols
 
 
 logger = logging.getLogger(__name__)
@@ -123,6 +123,24 @@ def _on_ticks(ticks: List[dict]) -> None:
 @app.get("/health")
 def health():
     return {"status": "ok"}
+
+
+@app.get("/")
+def root():
+    return {
+        "name": "Zerodha Auto Trader API",
+        "endpoints": [
+            "/health",
+            "/symbols/search?q=RELIANCE&exchange=NSE&limit=10",
+            "/auth/login_url",
+            "/auth/exchange",
+            "/auth/profile",
+            "/subscribe",
+            "/unsubscribe",
+            "/order",
+            "/ws/ticks",
+        ],
+    }
 
 
 @app.post("/subscribe")
@@ -234,5 +252,20 @@ async def ws_ticks(ws: WebSocket):
             await ws.send_bytes(orjson.dumps({"ticks": payload}))
     except WebSocketDisconnect:
         return
+
+
+@app.get("/symbols/search")
+def symbols_search(q: str, exchange: Optional[str] = None, limit: int = 20):
+    items = search_symbols(instruments, q, exchange=exchange, limit=limit)
+    return [
+        {
+            "instrument_token": i.instrument_token,
+            "tradingsymbol": i.tradingsymbol,
+            "name": i.name,
+            "exchange": i.exchange,
+            "segment": i.segment,
+        }
+        for i in items
+    ]
 
 

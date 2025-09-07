@@ -91,12 +91,12 @@ class MarketTicker:
         self._connected = False
 
     def subscribe(self, tokens: Iterable[int]) -> None:
+        token_list = list(tokens)
         if not self._ticker or not self._connected or not getattr(self._ticker, "ws", None):
             # Queue until WS is fully connected
             self._queued_subscribe.extend(token_list)
             logger.info("Queueing subscribe for %s tokens (ws not ready)", len(token_list))
             return
-        token_list = list(tokens)
         if not token_list:
             return
         self._subscribed = list(set(self._subscribed + token_list))
@@ -107,12 +107,12 @@ class MarketTicker:
             self._ticker.set_mode(self._ticker.MODE_LTP, token_list)
 
     def unsubscribe(self, tokens: Iterable[int]) -> None:
+        token_list = list(tokens)
         if not self._ticker or not self._connected or not getattr(self._ticker, "ws", None):
             # Remove from queue if present
             self._queued_subscribe = [t for t in self._queued_subscribe if t not in token_list]
             logger.info("Skipping unsubscribe while ws not ready")
             return
-        token_list = list(tokens)
         if not token_list:
             return
         self._subscribed = [t for t in self._subscribed if t not in token_list]
