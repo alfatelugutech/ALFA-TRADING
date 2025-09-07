@@ -8,6 +8,7 @@ type Tick = {
   last_traded_price?: number;
   ltp?: number;
   symbol?: string;
+  updated_at?: number;
 };
 
 const backendUrl = process.env.NEXT_PUBLIC_BACKEND_URL || "http://localhost:10000";
@@ -24,6 +25,8 @@ export default function Home() {
   const [status, setStatus] = useState<{ auth: boolean } | null>(null);
   const [watchlist, setWatchlist] = useState<string[]>([]);
   const [wsConnected, setWsConnected] = useState<boolean>(false);
+  const [dark, setDark] = useState<boolean>(false);
+  const [toasts, setToasts] = useState<{ id: number; text: string; kind: "info" | "success" | "error" }[]>([]);
 
   useEffect(() => {
     const ws = new WebSocket(backendUrl.replace(/^http/, "ws") + "/ws/ticks");
@@ -32,7 +35,8 @@ export default function Home() {
       try {
         const data = JSON.parse(evt.data);
         if (Array.isArray(data.ticks)) {
-          setTicks(data.ticks);
+          const ts = Date.now();
+          setTicks(data.ticks.map((t: any) => ({ ...t, updated_at: ts })));
         }
       } catch {}
     };
@@ -75,16 +79,54 @@ export default function Home() {
       localStorage.setItem("watchlist", JSON.stringify(watchlist));
       localStorage.setItem("exchange", exchange);
       localStorage.setItem("mode", mode);
+      localStorage.setItem("dark", dark ? "1" : "0");
     } catch {}
-  }, [watchlist, exchange, mode]);
+  }, [watchlist, exchange, mode, dark]);
+
+  useEffect(() => {
+    try {
+      const d = localStorage.getItem("dark");
+      if (d === "1") setDark(true);
+    } catch {}
+  }, []);
+
+  const pushToast = (text: string, kind: "info" | "success" | "error" = "info") => {
+    const id = Date.now() + Math.floor(Math.random() * 1000);
+    setToasts((t) => [...t, { id, text, kind }]);
+    setTimeout(() => setToasts((t) => t.filter((x) => x.id !== id)), 3500);
+  };
+
+  const subscribeSymbols = async (list: string[]) => {
+    if (!list.length) return;
+    try {
+      await fetch(backendUrl + "/subscribe", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ symbols: list, exchange, mode }),
+      });
+      pushToast(`Subscribed ${list.length} symbol(s)`, "success");
+    } catch {
+      pushToast("Subscribe failed", "error");
+    }
+  };
+
+  const unsubscribeSymbols = async (list: string[]) => {
+    if (!list.length) return;
+    try {
+      await fetch(backendUrl + "/unsubscribe", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ symbols: list, exchange, mode }),
+      });
+      pushToast(`Unsubscribed ${list.length} symbol(s)`, "success");
+    } catch {
+      pushToast("Unsubscribe failed", "error");
+    }
+  };
 
   const subscribe = async () => {
     const list = symbols.split(/\s+/).filter(Boolean);
-    await fetch(backendUrl + "/subscribe", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ symbols: list, exchange, mode }),
-    });
+    await subscribeSymbols(list);
     // Merge into watchlist
     const merged = Array.from(new Set([...(watchlist || []), ...list.map((s) => s.toUpperCase())]));
     setWatchlist(merged);
@@ -92,20 +134,12 @@ export default function Home() {
 
   const subscribeWatchlist = async () => {
     if (!watchlist.length) return;
-    await fetch(backendUrl + "/subscribe", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ symbols: watchlist, exchange, mode }),
-    });
+    await subscribeSymbols(watchlist);
   };
 
   const unsubscribeAll = async () => {
     if (!watchlist.length) return;
-    await fetch(backendUrl + "/unsubscribe", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ symbols: watchlist, exchange, mode }),
-    });
+    await unsubscribeSymbols(watchlist);
   };
 
   const clearWatchlist = async () => {
@@ -142,14 +176,17 @@ export default function Home() {
       .sort((a, b) => (a.symbol || "").localeCompare(b.symbol || ""))
       .map((t) => {
         const price = t.last_price ?? t.last_traded_price ?? t.ltp ?? 0;
+        const updated = t.updated_at ? new Date(t.updated_at).toLocaleTimeString() : "-";
         return (
           <tr key={t.instrument_token}>
             <td>{t.symbol}</td>
             <td style={{ textAlign: "right" }}>{price.toFixed(2)}</td>
+            <td style={{ textAlign: "center", fontSize: 12 }}>{exchange}/{mode.toUpperCase()}</td>
+            <td style={{ textAlign: "center", fontSize: 12 }}>{updated}</td>
           </tr>
         );
       });
-  }, [ticks]);
+  }, [ticks, exchange, mode]);
 
   const runSearch = async () => {
     if (!search.trim()) return;
@@ -162,7 +199,17 @@ export default function Home() {
   };
 
   return (
-    <main style={{ maxWidth: 900, margin: "20px auto", fontFamily: "sans-serif" }}>
+    <main
+      style={{
+        maxWidth: 900,
+        margin: "20px auto",
+        fontFamily: "sans-serif",
+        color: dark ? "#e6edf3" : "#111",
+        background: dark ? "#0d1117" : "#fff",
+        minHeight: "100vh",
+        padding: 12,
+      }}
+    >
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
         <h2>Zerodha Live Ticks</h2>
         <a
@@ -172,9 +219,15 @@ export default function Home() {
           Login with Zerodha
         </a>
       </div>
+      <div style={{ marginBottom: 8 }}>
+        <label style={{ fontSize: 12 }}>
+          <input type="checkbox" checked={dark} onChange={(e) => setDark(e.target.checked)} style={{ marginRight: 6 }} />
+          Dark mode
+        </label>
+      </div>
       {status && (
         <div style={{ marginBottom: 8, fontSize: 12, color: status.auth ? "#0a0" : "#a00" }}>
-          {status.auth ? "Authenticated" : "Not authenticated"} · WS {wsConnected ? "Connected" : "Disconnected"}
+          {status.auth ? "Authenticated" : "Not authenticated"} · WS {wsConnected ? "Connected" : "Disconnected"} · Mode {status.dry_run ? "Paper" : "Live"}
         </div>
       )}
       <div style={{ display: "flex", gap: 12, marginBottom: 12 }}>
@@ -213,6 +266,46 @@ export default function Home() {
         <button onClick={runSearch} style={{ padding: "8px 12px" }}>
           Search
         </button>
+        <button
+          onClick={async () => {
+            const short = Number(prompt("Short SMA", "20") || 20);
+            const long = Number(prompt("Long SMA", "50") || 50);
+            const live = confirm("Live trading? OK for Live, Cancel for Paper");
+            const list = watchlist.length ? watchlist : symbols.split(/\s+/).filter(Boolean);
+            await fetch(backendUrl + "/strategy/sma/start", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ symbols: list, exchange, short, long, live }),
+            });
+            pushToast(`SMA started (${short}/${long}) ${live ? "LIVE" : "PAPER"}`, "success");
+          }}
+          style={{ padding: "8px 12px" }}
+        >
+          Start SMA
+        </button>
+        <button
+          onClick={async () => {
+            await fetch(backendUrl + "/strategy/stop", { method: "POST" });
+            pushToast("Strategy stopped", "success");
+          }}
+          style={{ padding: "8px 12px" }}
+        >
+          Stop SMA
+        </button>
+        <button
+          onClick={async () => {
+            const wantLive = confirm("Switch to LIVE mode? (Cancel switches to PAPER)");
+            await fetch(backendUrl + "/config/dry_run", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ value: !wantLive ? true : false }),
+            });
+            pushToast(wantLive ? "Live mode set" : "Paper mode set", "success");
+          }}
+          style={{ padding: "8px 12px" }}
+        >
+          Toggle Paper/Live
+        </button>
       </div>
       {results.length > 0 && (
         <div style={{ marginBottom: 12, fontSize: 14 }}>
@@ -234,6 +327,8 @@ export default function Home() {
           {watchlist.map((s) => (
             <span key={s} style={{ border: "1px solid #ccc", padding: "2px 6px", borderRadius: 12, marginRight: 6 }}>
               {s}{" "}
+              <button onClick={() => subscribeSymbols([s])} style={{ marginLeft: 4 }}>▶</button>
+              <button onClick={() => unsubscribeSymbols([s])} style={{ marginLeft: 4 }}>⏸</button>
               <button onClick={() => setWatchlist(watchlist.filter((x) => x !== s))} style={{ marginLeft: 4 }}>
                 ×
               </button>
@@ -248,10 +343,30 @@ export default function Home() {
           <tr>
             <th style={{ textAlign: "left" }}>Symbol</th>
             <th style={{ textAlign: "right" }}>Price</th>
+            <th style={{ textAlign: "center" }}>X/M</th>
+            <th style={{ textAlign: "center" }}>Updated</th>
           </tr>
         </thead>
         <tbody>{rows}</tbody>
       </table>
+
+      <div style={{ position: "fixed", top: 16, right: 16, display: "flex", flexDirection: "column", gap: 8 }}>
+        {toasts.map((t) => (
+          <div
+            key={t.id}
+            style={{
+              background: t.kind === "error" ? "#fee2e2" : t.kind === "success" ? "#dcfce7" : "#e5e7eb",
+              color: "#111",
+              padding: "8px 12px",
+              borderRadius: 8,
+              boxShadow: "0 2px 6px rgba(0,0,0,0.15)",
+              minWidth: 220,
+            }}
+          >
+            {t.text}
+          </div>
+        ))}
+      </div>
     </main>
   );
 }
