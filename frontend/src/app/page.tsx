@@ -66,6 +66,9 @@ export default function Home() {
   const [schedStop, setSchedStop] = useState<string>("15:25");
   const [schedSquare, setSchedSquare] = useState<boolean>(true);
   const [schedSymbols, setSchedSymbols] = useState<string>("");
+  const [aiActive, setAiActive] = useState<boolean>(false);
+  const [aiCapital, setAiCapital] = useState<number>(10000);
+  const [aiRisk, setAiRisk] = useState<number>(1);
 
   useEffect(() => {
     const ws = new WebSocket(backendUrl.replace(/^http/, "ws") + "/ws/ticks");
@@ -113,6 +116,15 @@ export default function Home() {
         setSchedSymbols((c.symbols || []).join(" "));
       })
       .catch(() => {});
+    fetch(backendUrl + "/status/all")
+      .then((r)=>r.json())
+      .then((d)=>{
+        if (d?.ai) {
+          setAiActive(!!d.ai.active);
+          setAiCapital(Number(d.ai.trade_capital || 10000));
+          setAiRisk(Number((d.ai.risk_pct || 0.01) * 100));
+        }
+      }).catch(()=>{});
   }, []);
 
   // Initialize watchlist from localStorage (or default from symbols input)
@@ -589,6 +601,24 @@ export default function Home() {
           >
             Stop Now
           </button>
+        </div>
+      </section>
+
+      {/* AI Trading Controls */}
+      <section className="card" style={{ marginTop: 24 }}>
+        <h3>AI Trading</h3>
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 8 }}>
+          <label style={{ display: "flex", alignItems: "center", gap: 6 }}>
+            <input type="checkbox" checked={aiActive} onChange={(e)=>setAiActive(e.target.checked)} /> Enable AI
+          </label>
+          <input type="number" value={aiCapital} onChange={(e)=>setAiCapital(Number(e.target.value || 0))} placeholder="Trade capital" />
+          <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+            <input type="number" value={aiRisk} onChange={(e)=>setAiRisk(Number(e.target.value || 0))} placeholder="Risk %" /> % per trade
+          </div>
+          <button className="btn btn-primary" onClick={async ()=>{
+            await fetch(backendUrl + "/ai/config", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ active: aiActive, trade_capital: aiCapital, risk_pct: aiRisk/100 }) });
+            pushToast("AI config saved", "success");
+          }}>Save AI Config</button>
         </div>
       </section>
 

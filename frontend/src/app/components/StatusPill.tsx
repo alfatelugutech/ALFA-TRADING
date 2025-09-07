@@ -56,6 +56,26 @@ export default function StatusPill() {
     } catch {}
   };
 
+  const startAITrading = async () => {
+    try {
+      const capStr = prompt("AI trade capital", String((data?.ai?.trade_capital ?? 10000)));
+      const riskStr = prompt("Risk % per trade", String(((data?.ai?.risk_pct ?? 0.01) * 100)));
+      const cap = Number(capStr || 10000);
+      const riskPct = Number(riskStr || 1) / 100;
+      await fetch(backendUrl + "/ai/config", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ active: true, trade_capital: cap, risk_pct: riskPct }) });
+      await startStrategy();
+      load();
+    } catch {}
+  };
+
+  const stopAITrading = async () => {
+    try {
+      await fetch(backendUrl + "/ai/config", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ active: false, trade_capital: data?.ai?.trade_capital ?? 10000, risk_pct: data?.ai?.risk_pct ?? 0.01 }) });
+      await stopStrategy();
+      load();
+    } catch {}
+  };
+
   return (
     <div style={{ position: "relative" }}>
       <details>
@@ -77,6 +97,8 @@ export default function StatusPill() {
             <button className="btn btn-success" onClick={startStrategy}>Start</button>
             <button className="btn btn-danger" onClick={stopStrategy}>Stop</button>
             <button className="btn" onClick={toggleMode}>{data?.dry_run ? "Switch to LIVE" : "Switch to PAPER"}</button>
+            <button className="btn btn-success" onClick={startAITrading}>Start AI</button>
+            <button className="btn" onClick={stopAITrading}>Stop AI</button>
           </div>
         </div>
       </details>
