@@ -17,6 +17,8 @@ export default function Home() {
   const [ticks, setTicks] = useState<Tick[]>([]);
   const wsRef = useRef<WebSocket | null>(null);
   const [loginUrl, setLoginUrl] = useState<string>("");
+  const [search, setSearch] = useState<string>("");
+  const [results, setResults] = useState<{ tradingsymbol: string; exchange: string }[]>([]);
 
   useEffect(() => {
     const ws = new WebSocket(backendUrl.replace(/^http/, "ws") + "/ws/ticks");
@@ -67,6 +69,16 @@ export default function Home() {
       });
   }, [ticks]);
 
+  const runSearch = async () => {
+    if (!search.trim()) return;
+    const url = new URL(backendUrl + "/symbols/search");
+    url.searchParams.set("q", search.trim());
+    url.searchParams.set("exchange", "NSE");
+    const resp = await fetch(url.toString());
+    const data = await resp.json();
+    setResults(data || []);
+  };
+
   return (
     <main style={{ maxWidth: 900, margin: "20px auto", fontFamily: "sans-serif" }}>
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
@@ -89,6 +101,22 @@ export default function Home() {
           Subscribe
         </button>
       </div>
+      <div style={{ display: "flex", gap: 12, marginBottom: 12 }}>
+        <input
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+          style={{ flex: 1, padding: 8 }}
+          placeholder="Search symbol by name or code (NSE)"
+        />
+        <button onClick={runSearch} style={{ padding: "8px 12px" }}>
+          Search
+        </button>
+      </div>
+      {results.length > 0 && (
+        <div style={{ marginBottom: 12, fontSize: 14 }}>
+          <b>Results:</b> {results.map((r) => r.tradingsymbol).join(", ")}
+        </div>
+      )}
       <table style={{ width: "100%", borderCollapse: "collapse" }}>
         <thead>
           <tr>
