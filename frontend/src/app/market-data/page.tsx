@@ -1,6 +1,8 @@
 "use client";
+export const dynamic = "force-dynamic";
 
 import { useEffect, useMemo, useRef, useState } from "react";
+import CandleChart from "../components/CandleChart";
 
 type Tick = { instrument_token: number; last_price?: number; last_traded_price?: number; ltp?: number; symbol?: string; };
 const backendUrl = process.env.NEXT_PUBLIC_BACKEND_URL || "http://localhost:10000";
@@ -11,6 +13,9 @@ export default function MarketData() {
   const [symbols, setSymbols] = useState<string>("TCS INFY RELIANCE");
   const [ticks, setTicks] = useState<Tick[]>([]);
   const wsRef = useRef<WebSocket | null>(null);
+  const [chartSym, setChartSym] = useState<string>("");
+  const [chartPrices, setChartPrices] = useState<number[]>([]);
+  const [chartTimes, setChartTimes] = useState<string[]>([]);
 
   useEffect(() => {
     const ws = new WebSocket(backendUrl.replace(/^http/, "ws") + "/ws/ticks");
@@ -51,6 +56,24 @@ export default function MarketData() {
     const rows: Tick[] = Object.entries(data || {}).map(([sym, price]) => ({ instrument_token: 0, ltp: Number(price || 0), symbol: sym }));
     setTicks(rows);
   };
+
+  // Simple mini chart updater for a selected symbol
+  useEffect(() => {
+    if (!chartSym) return;
+    const run = async () => {
+      try {
+        const data = await (await fetch(backendUrl + "/ltp?symbols=" + encodeURIComponent(chartSym) + "&exchange=NSE")).json();
+        const price = Number((data || {})[chartSym] || 0);
+        const now = new Date();
+        const ts = now.toLocaleTimeString();
+        setChartPrices((arr) => [...arr.slice(-59), price]);
+        setChartTimes((arr) => [...arr.slice(-59), ts]);
+      } catch {}
+    };
+    run();
+    const id = setInterval(run, 5000);
+    return () => clearInterval(id);
+  }, [chartSym]);
 
   const rows = useMemo(() => {
     const allow = new Set(symbols.split(/\s+/).filter(Boolean).map((s) => s.toUpperCase()));
@@ -95,6 +118,31 @@ export default function MarketData() {
         </thead>
         <tbody>{rows}</tbody>
       </table>
+
+      {/* Quick Live Chart */}
+      <div className="card" style={{ marginTop: 16 }}>
+        <div style={{ display: "flex", gap: 8, alignItems: "center", marginBottom: 8 }}>
+          <input placeholder="Symbol for chart (e.g., TCS)" value={chartSym} onChange={(e)=>{ setChartPrices([]); setChartTimes([]); setChartSym(e.target.value.toUpperCase()); }} style={{ width: 260, padding: 8 }} />
+          <button className="btn" onClick={()=>{ setChartPrices([]); setChartTimes([]); }}>Clear</button>
+        </div>
+        {chartSym && (
+          <div style={{ width: "100%", height: 180 }}>
+            <svg viewBox="0 0 600 180" preserveAspectRatio="none" style={{ width: "100%", height: 180 }}>
+              <polyline fill="none" stroke="#60a5fa" strokeWidth="2" points={chartPrices.map((p, i) => `${(i/(Math.max(1,chartPrices.length-1)))*600},${180 - ((p - Math.min(...chartPrices)) / Math.max(1,(Math.max(...chartPrices)-Math.min(...chartPrices)))) * 160 - 10}`).join(" ")} />
+            </svg>
+            <div style={{ display: "flex", justifyContent: "space-between", fontSize: 10, color: "var(--muted)" }}>
+              {chartTimes.slice(-6).map((t,i)=>(<span key={i}>{t}</span>))}
+            </div>
+          </div>
+        )}
+      </div>
+
+      {/* Candlestick Chart */}
+      {chartSym && (
+        <div style={{ marginTop: 16 }}>
+          <CandleChart symbol={chartSym} exchange="NSE" />
+        </div>
+      )}
     </main>
   );
 }

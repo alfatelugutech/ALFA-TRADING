@@ -2,6 +2,8 @@
 export const dynamic = "force-dynamic";
 
 import { useEffect, useMemo, useRef, useState } from "react";
+import AlertSound from "./components/AlertSound";
+import CandleChart from "./components/CandleChart";
 
 type Tick = {
   instrument_token: number;
@@ -71,6 +73,9 @@ export default function Home() {
   const [aiCapital, setAiCapital] = useState<number>(10000);
   const [aiRisk, setAiRisk] = useState<number>(1);
   const [isPaper, setIsPaper] = useState<boolean>(true);
+  const [dashSym, setDashSym] = useState<string>("");
+  const [alerts, setAlerts] = useState<{ id: number; symbol: string; type: "price_above"|"price_below"|"upl_above"|"upl_below"; value: number; enabled: boolean }[]>([]);
+  const [alertTrigger, setAlertTrigger] = useState<number>(0);
 
   useEffect(() => {
     const ws = new WebSocket(backendUrl.replace(/^http/, "ws") + "/ws/ticks");
@@ -258,6 +263,29 @@ export default function Home() {
       });
   }, [ticks, exchange, mode]);
 
+  // Alerts evaluation
+  useEffect(() => {
+    if (!alerts.length) return;
+    const bySymbol: Record<string, number> = {};
+    for (const t of ticks) {
+      if (!t.symbol) continue;
+      const price = (t.last_price ?? t.last_traded_price ?? t.ltp ?? 0) as number;
+      bySymbol[String(t.symbol)] = Number(price || 0);
+    }
+    const now = Date.now();
+    alerts.forEach((a) => {
+      if (!a.enabled) return;
+      const sym = a.symbol.toUpperCase();
+      if (a.type === "price_above" && bySymbol[sym] && bySymbol[sym] >= a.value) {
+        pushToast(`${sym} ≥ ${a.value} hit`, "success");
+        setAlertTrigger(now);
+      } else if (a.type === "price_below" && bySymbol[sym] && bySymbol[sym] <= a.value) {
+        pushToast(`${sym} ≤ ${a.value} hit`, "error");
+        setAlertTrigger(now);
+      }
+    });
+  }, [ticks, alerts]);
+
   const runSearch = async () => {
     if (!search.trim()) return;
     const url = new URL(backendUrl + "/symbols/search");
@@ -279,6 +307,7 @@ export default function Home() {
           Login with Zerodha
         </a>
       </div>
+      <AlertSound trigger={alertTrigger} />
       <div className="card" style={{ marginBottom: 8 }}>
         <label style={{ fontSize: 12 }}>
           <input type="checkbox" checked={dark} onChange={(e) => setDark(e.target.checked)} style={{ marginRight: 6 }} />
@@ -607,6 +636,46 @@ export default function Home() {
         </div>
       </section>
 
+      {/* Alerts */}
+      <section className="card" style={{ marginTop: 24 }}>
+        <h3>Alerts</h3>
+        <div style={{ display: "flex", gap: 8, marginBottom: 8, flexWrap: "wrap" }}>
+          <input placeholder="Symbol" style={{ width: 120, padding: 6 }} id="alert-sym" />
+          <select id="alert-type">
+            <option value="price_above">Price ≥</option>
+            <option value="price_below">Price ≤</option>
+          </select>
+          <input placeholder="Value" type="number" style={{ width: 140, padding: 6 }} id="alert-val" />
+          <button className="btn" onClick={() => {
+            const sym = (document.getElementById('alert-sym') as HTMLInputElement).value.toUpperCase().trim();
+            const type = (document.getElementById('alert-type') as HTMLSelectElement).value as any;
+            const value = Number((document.getElementById('alert-val') as HTMLInputElement).value || 0);
+            if (!sym || !value) { pushToast('Enter symbol and value', 'error'); return; }
+            setAlerts((arr)=>[...arr, { id: Date.now(), symbol: sym, type, value, enabled: true }]);
+          }}>Add Alert</button>
+        </div>
+        {alerts.length > 0 && (
+          <table className="table">
+            <thead><tr><th>Symbol</th><th>Type</th><th style={{ textAlign: 'right' }}>Value</th><th style={{ textAlign: 'center' }}>On</th><th></th></tr></thead>
+            <tbody>
+              {alerts.map((a)=> (
+                <tr key={a.id}>
+                  <td>{a.symbol}</td>
+                  <td>{a.type.replace('_',' ')}</td>
+                  <td style={{ textAlign: 'right' }}>{a.value}</td>
+                  <td style={{ textAlign: 'center' }}>
+                    <input type="checkbox" checked={a.enabled} onChange={(e)=>setAlerts(alerts.map(x=>x.id===a.id?{...x, enabled:e.target.checked}:x))} />
+                  </td>
+                  <td style={{ textAlign: 'center' }}>
+                    <button className="btn" onClick={()=>setAlerts(alerts.filter(x=>x.id!==a.id))}>Delete</button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
+      </section>
+
       {/* AI Trading Controls */}
       <section className="card" style={{ marginTop: 24 }}>
         <h3>AI Trading</h3>
@@ -646,6 +715,21 @@ export default function Home() {
           <button className="btn" onClick={async ()=>{ await fetch(backendUrl + "/config/dry_run", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ value: true }) }); setIsPaper(true); pushToast("Switched to Paper", "success");}}>Switch to Paper</button>
           <button className="btn btn-danger" onClick={async ()=>{ await fetch(backendUrl + "/config/dry_run", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ value: false }) }); setIsPaper(false); pushToast("Switched to Live", "success");}}>Switch to Live</button>
         </div>
+      </section>
+
+      {/* Dashboard Candle Widget */}
+      <section className="card" style={{ marginTop: 24 }}>
+        <h3>Dashboard Chart</h3>
+        <div style={{ display: "flex", gap: 8, alignItems: "center", marginBottom: 8 }}>
+          <input id="dash-chart-sym" placeholder="Symbol (e.g., TCS)" defaultValue={watchlist[0] || ""} style={{ width: 220, padding: 6 }} />
+          <button className="btn" onClick={()=>{
+            const v = (document.getElementById('dash-chart-sym') as HTMLInputElement).value.toUpperCase();
+            setDashSym(v);
+          }}>Load</button>
+        </div>
+        {dashSym && (
+          <CandleChart symbol={dashSym} exchange={exchange} />
+        )}
       </section>
 
       <section className="card" style={{ marginTop: 24 }}>
@@ -702,6 +786,8 @@ export default function Home() {
               <th style={{ textAlign: "right", cursor: "pointer" }} onClick={() => setPositions(positions.slice().sort((a,b)=>a.avg_price-b.avg_price))}>Avg</th>
               <th style={{ textAlign: "right", cursor: "pointer" }} onClick={() => setPositions(positions.slice().sort((a,b)=>a.ltp-b.ltp))}>LTP</th>
               <th style={{ textAlign: "right", cursor: "pointer" }} onClick={() => setPositions(positions.slice().sort((a,b)=>a.unrealized-b.unrealized))}>Unrealized</th>
+              <th style={{ textAlign: "center" }}>Trailing %</th>
+              <th></th>
             </tr>
           </thead>
           <tbody>
@@ -712,6 +798,20 @@ export default function Home() {
                 <td style={{ textAlign: "right" }}>{p.avg_price.toFixed(2)}</td>
                 <td style={{ textAlign: "right" }}>{p.ltp.toFixed(2)}</td>
                 <td style={{ textAlign: "right", color: p.unrealized >= 0 ? "#0a0" : "#a00" }}>{p.unrealized.toFixed(2)}</td>
+                <td style={{ textAlign: "center" }}>
+                  <input
+                    type="number"
+                    placeholder="%"
+                    style={{ width: 70, padding: 4 }}
+                    onKeyDown={async (e:any)=>{
+                      if (e.key === 'Enter'){
+                        const pct = Number(e.currentTarget.value || 0)/100;
+                        await fetch(backendUrl + '/risk/trailing/override', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ symbol: p.symbol, exchange, pct }) });
+                        pushToast(`Trailing set for ${p.symbol}`, 'success');
+                      }
+                    }}
+                  />
+                </td>
                 <td style={{ textAlign: "center" }}>
                   <button
                     onClick={async () => {
@@ -734,7 +834,7 @@ export default function Home() {
 
       {/* Options Chain */}
       <section className="card" style={{ marginTop: 24 }}>
-        <h3>Options Chain (NFO)</h3>
+        <h3>Options Chain (NFO) + Index Mini Charts</h3>
         <div style={{ display: "flex", gap: 8, marginBottom: 8 }}>
           <select value={optUnder} onChange={(e) => setOptUnder(e.target.value)}>
             <option value="NIFTY">NIFTY</option>
@@ -812,6 +912,15 @@ export default function Home() {
           >
             Export PDF
           </button>
+        </div>
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 12, marginBottom: 16 }}>
+          {[
+            { key: "NIFTY 50", k: "NSE:NIFTY 50" },
+            { key: "BANKNIFTY", k: "NSE:NIFTY BANK" },
+            { key: "SENSEX", k: "BSE:SENSEX" },
+          ].map((idx) => (
+            <IndexMini key={idx.key} title={idx.key} kiteKey={idx.k} />
+          ))}
         </div>
         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
           <div>
