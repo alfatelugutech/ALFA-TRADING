@@ -8,6 +8,7 @@ from typing import Dict, List, Optional
 
 import orjson
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
+from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
 from app.config import get_config
@@ -21,6 +22,21 @@ logger = logging.getLogger(__name__)
 
 app = FastAPI(title="Zerodha Auto Trader API")
 
+# CORS for frontend (Vercel)
+import os
+_allowed = os.getenv("ALLOWED_ORIGINS", "*")
+if _allowed.strip() == "*":
+    _origins = ["*"]
+else:
+    _origins = [o.strip() for o in _allowed.split(",") if o.strip()]
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=_origins,
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
 
 class SubscribeRequest(BaseModel):
     symbols: List[str]
@@ -33,6 +49,11 @@ class OrderRequest(BaseModel):
     exchange: str = "NSE"
     side: str  # BUY|SELL
     quantity: int = 1
+
+
+class ExchangeRequest(BaseModel):
+    request_token: str
+    refresh_instruments: Optional[bool] = True
 
 
 # App state
@@ -140,6 +161,45 @@ def order(req: OrderRequest):
         transaction_type=txn_type,
     )
     return resp
+
+
+@app.get("/auth/login_url")
+def auth_login_url():
+    try:
+        url = broker.kite.login_url()
+        return {"url": url}
+    except Exception:
+        logger.exception("Failed to get login_url")
+        return {"url": None}
+
+
+@app.post("/auth/exchange")
+def auth_exchange(req: ExchangeRequest):
+    global ticker, instruments
+    data = broker.generate_session(req.request_token)
+    access_token = data.get("access_token")
+    # Set in runtime
+    cfg.access_token = access_token
+    broker.kite.set_access_token(access_token)
+    # Reset ticker so next subscribe uses fresh token
+    ticker = None
+    # Optionally refresh instruments
+    refreshed = 0
+    if req.refresh_instruments:
+        try:
+            data_ins = broker.instruments()
+            if data_ins:
+                csv_path = Path(cfg.instruments_csv_path)
+                csv_path.parent.mkdir(parents=True, exist_ok=True)
+                with csv_path.open("w", newline="", encoding="utf-8") as f:
+                    writer = csv.DictWriter(f, fieldnames=data_ins[0].keys())
+                    writer.writeheader()
+                    writer.writerows(data_ins)
+                instruments = load_instruments(str(csv_path))
+                refreshed = len(instruments)
+        except Exception:
+            logger.exception("Failed to refresh instruments after exchange")
+    return {"access_token": access_token, "instruments": refreshed}
 
 
 @app.websocket("/ws/ticks")
