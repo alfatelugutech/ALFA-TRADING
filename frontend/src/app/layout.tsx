@@ -14,14 +14,47 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
         <header className="card sticky-top" style={{ maxWidth: 1100, margin: "12px auto", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
           <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
             <div style={{ fontWeight: 700 }}>Zerodha Auto Trader</div>
-            <nav className="topnav" style={{ display: "flex", gap: 8 }}>
+            <nav className="topnav" style={{ display: "flex", gap: 8, alignItems: "center" }}>
               <a href="/">Dashboard</a>
-              <a href="/market-data">Market Data</a>
-              <a href="/options-builder">Options Builder</a>
-              <a href="/options-trading">Options</a>
-              <a href="/portfolio">Portfolio</a>
-              <a href="/orders">Orders</a>
-              <a href="/analytics">Analytics</a>
+              <div className="dropdown">
+                <details>
+                  <summary>Market ▾</summary>
+                  <div className="card menu menu-left">
+                    <a href="/market-data">Live Market Data</a>
+                    <a href="/analytics">Analytics</a>
+                    <a href="/trade-reports">Reports</a>
+                  </div>
+                </details>
+              </div>
+              <div className="dropdown">
+                <details>
+                  <summary>Options ▾</summary>
+                  <div className="card menu menu-left">
+                    <a href="/options-trading">Options Trading</a>
+                    <a href="/options-builder">Strategy Builder</a>
+                  </div>
+                </details>
+              </div>
+              <div className="dropdown">
+                <details>
+                  <summary>Trading ▾</summary>
+                  <div className="card menu menu-left">
+                    <a href="/strategy-builder">Strategies</a>
+                    <a href="/risk">Risk Management</a>
+                    <a href="/orders">Orders</a>
+                    <a href="/portfolio">Portfolio</a>
+                  </div>
+                </details>
+              </div>
+              <div className="dropdown">
+                <details>
+                  <summary>Tools ▾</summary>
+                  <div className="card menu menu-left">
+                    <a href="/backtesting">Backtesting</a>
+                    <a href="/settings">Settings</a>
+                  </div>
+                </details>
+              </div>
             </nav>
           </div>
           <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
