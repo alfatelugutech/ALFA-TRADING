@@ -523,6 +523,13 @@ def history(symbol: Optional[str] = None, exchange: str = "NSE", interval: str =
         mapping = resolve_tokens_by_symbols(instruments, [sym], exchange=ex)
         token = mapping.get(sym)
         if not token:
+            # Fallback: try quote() to get instrument_token (works for indices)
+            try:
+                q = broker.kite.quote([f"{ex}:{sym}"]) or {}
+                token = ((q.get(f"{ex}:{sym}") or {}).get("instrument_token"))
+            except Exception:
+                token = None
+        if not token:
             return {"candles": []}
         tz = ZoneInfo("Asia/Kolkata")
         now = datetime.now(tz)
@@ -541,6 +548,7 @@ def history(symbol: Optional[str] = None, exchange: str = "NSE", interval: str =
         step_minutes = step_minutes_map.get(interval, 1)
         delta = timedelta(minutes=max(1, step_minutes) * max(1, int(count)))
         start = now - delta
+        # Zerodha expects timezone-naive UTC timestamps; we provide aware dt which SDK handles.
         data = broker.kite.historical_data(token, start, now, interval)
         candles = []
         for row in data or []:
