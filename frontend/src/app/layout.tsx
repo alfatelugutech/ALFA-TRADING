@@ -1,3 +1,4 @@
+"use client";
 export const metadata: { title: string; description: string } = {
   title: "Zerodha Auto Trader",
   description: "Live market ticks",
