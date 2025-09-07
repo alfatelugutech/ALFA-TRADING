@@ -235,6 +235,15 @@ def auth_profile():
         return {"error": str(e)}
 
 
+@app.get("/status")
+def status():
+    try:
+        prof = broker.kite.profile()
+        return {"auth": True, "user_id": prof.get("user_id")}
+    except Exception:
+        return {"auth": False}
+
+
 @app.websocket("/ws/ticks")
 async def ws_ticks(ws: WebSocket):
     await ws.accept()
@@ -267,5 +276,26 @@ def symbols_search(q: str, exchange: Optional[str] = None, limit: int = 20):
         }
         for i in items
     ]
+
+
+@app.get("/ltp")
+def ltp(symbols: str, exchange: str = "NSE"):
+    sym_list = [s.strip().upper() for s in (symbols or "").split(",") if s.strip()]
+    if not sym_list:
+        return {}
+    mapping = resolve_tokens_by_symbols(instruments, sym_list, exchange=exchange)
+    if not mapping:
+        return {}
+    # Build Zerodha LTP instrument map: "EXCHANGE:TRADINGSYMBOL":
+    inst_map = {f"{exchange}:{sym}": sym for sym in mapping.keys()}
+    data = broker.get_ltp(inst_map)
+    # Convert back to simple { symbol: price }
+    out = {}
+    for key, val in (data or {}).items():
+        sym = inst_map.get(key)
+        if not sym:
+            continue
+        out[sym] = val.get("last_price")
+    return out
 
 
