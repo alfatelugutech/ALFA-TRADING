@@ -28,6 +28,8 @@ class MarketTicker:
         self.mode_full = mode_full
         self._ticker: Optional[KiteTicker] = None
         self._subscribed: List[int] = []
+        self._connected: bool = False
+        self._queued_subscribe: List[int] = []
 
     def start(self, tokens: Iterable[int]) -> None:
         ticker = KiteTicker(self.api_key, self.access_token)
@@ -42,12 +44,24 @@ class MarketTicker:
         def _on_connect(ws, response):
             try:
                 token_list = list(tokens)
-                self._subscribed = token_list
-                ws.subscribe(token_list)
-                if self.mode_full:
-                    ws.set_mode(ws.MODE_FULL, token_list)
-                else:
-                    ws.set_mode(ws.MODE_LTP, token_list)
+                self._connected = True
+                if token_list:
+                    self._subscribed = token_list
+                    ws.subscribe(token_list)
+                    if self.mode_full:
+                        ws.set_mode(ws.MODE_FULL, token_list)
+                    else:
+                        ws.set_mode(ws.MODE_LTP, token_list)
+                # Flush any queued subscriptions
+                if self._queued_subscribe:
+                    unique = list(set(self._queued_subscribe))
+                    self._queued_subscribe.clear()
+                    self._subscribed = list(set(self._subscribed + unique))
+                    ws.subscribe(unique)
+                    if self.mode_full:
+                        ws.set_mode(ws.MODE_FULL, unique)
+                    else:
+                        ws.set_mode(ws.MODE_LTP, unique)
                 if self.on_connect:
                     self.on_connect()
             except Exception:
@@ -74,10 +88,14 @@ class MarketTicker:
                 self._ticker.close()
             except Exception:
                 logger.exception("Error closing ticker")
+        self._connected = False
 
     def subscribe(self, tokens: Iterable[int]) -> None:
-        if not self._ticker:
-            raise RuntimeError("Ticker not started")
+        if not self._ticker or not self._connected or not getattr(self._ticker, "ws", None):
+            # Queue until WS is fully connected
+            self._queued_subscribe.extend(token_list)
+            logger.info("Queueing subscribe for %s tokens (ws not ready)", len(token_list))
+            return
         token_list = list(tokens)
         if not token_list:
             return
@@ -89,8 +107,11 @@ class MarketTicker:
             self._ticker.set_mode(self._ticker.MODE_LTP, token_list)
 
     def unsubscribe(self, tokens: Iterable[int]) -> None:
-        if not self._ticker:
-            raise RuntimeError("Ticker not started")
+        if not self._ticker or not self._connected or not getattr(self._ticker, "ws", None):
+            # Remove from queue if present
+            self._queued_subscribe = [t for t in self._queued_subscribe if t not in token_list]
+            logger.info("Skipping unsubscribe while ws not ready")
+            return
         token_list = list(tokens)
         if not token_list:
             return
