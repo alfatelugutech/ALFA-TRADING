@@ -429,29 +429,88 @@ def ltp(symbols: str, exchange: str = "NSE"):
     sym_list = [s.strip().upper() for s in (symbols or "").split(",") if s.strip()]
     if not sym_list:
         return {}
-    mapping = resolve_tokens_by_symbols(instruments, sym_list, exchange=exchange)
-    if not mapping:
-        return {}
-    # Build Zerodha LTP instrument map: "EXCHANGE:TRADINGSYMBOL":
-    inst_map = {f"{exchange}:{sym}": sym for sym in mapping.keys()}
-    data = broker.get_ltp(inst_map)
-    # Convert back to simple { symbol: price }
+    # Require authentication
+    try:
+        broker.kite.profile()
+    except Exception:
+        return {"error": "NOT_AUTHENTICATED"}
+    # Prefer latest websocket tick per symbol; fallback to broker LTP API per symbol
     out = {}
-    for key, val in (data or {}).items():
-        sym = inst_map.get(key)
-        if not sym:
-            continue
-        out[sym] = val.get("last_price")
+    try:
+        mapping = resolve_tokens_by_symbols(instruments, sym_list, exchange=exchange)
+    except Exception:
+        mapping = {}
+    for sym in sym_list:
+        price = 0.0
+        try:
+            tok = mapping.get(sym)
+            if tok and tok in latest_ticks:
+                t = latest_ticks.get(tok) or {}
+                price = float(t.get("last_price") or t.get("last_traded_price") or t.get("ltp") or 0)
+        except Exception:
+            pass
+        if not price or price <= 0:
+            try:
+                data = broker.get_ltp({f"{exchange}:{sym}": sym})
+                rec = data.get(f"{exchange}:{sym}") or {}
+                price = float(rec.get("last_price") or rec.get("last_traded_price") or rec.get("ltp") or 0)
+            except Exception:
+                price = 0.0
+        if price and price > 0:
+            out[sym] = price
+        else:
+            out[sym] = 0.0
     return out
 
 
 def _get_ltp_for_symbol(exchange: str, symbol: str) -> float:
+    # 1) Try latest websocket tick if we have the token
+    try:
+        mapping = resolve_tokens_by_symbols(instruments, [symbol], exchange=exchange)
+        tok = mapping.get(symbol)
+        if tok and tok in latest_ticks:
+            t = latest_ticks.get(tok) or {}
+            price_tick = float(t.get("last_price") or t.get("last_traded_price") or t.get("ltp") or 0)
+            if price_tick > 0:
+                return price_tick
+    except Exception:
+        pass
+    # 2) Fallback to broker LTP API
     try:
         data = broker.get_ltp({f"{exchange}:{symbol}": symbol})
         rec = data.get(f"{exchange}:{symbol}") or {}
-        return float(rec.get("last_price", 0) or 0)
+        price_api = float(rec.get("last_price") or rec.get("last_traded_price") or rec.get("ltp") or 0)
+        if price_api > 0:
+            return price_api
     except Exception:
-        return 0.0
+        pass
+    # 3) Ultimate fallback: compute mid from best bid/ask if present in quote
+    try:
+        q = broker.kite.quote([f"{exchange}:{symbol}"]) or {}
+        rec = q.get(f"{exchange}:{symbol}") or {}
+        bid = 0.0
+        ask = 0.0
+        try:
+            bids = rec.get("depth", {}).get("buy", [])
+            asks = rec.get("depth", {}).get("sell", [])
+            if bids:
+                bid = float((bids[0] or {}).get("price") or 0)
+            if asks:
+                ask = float((asks[0] or {}).get("price") or 0)
+        except Exception:
+            pass
+        mid = 0.0
+        if bid > 0 and ask > 0:
+            mid = (bid + ask) / 2.0
+        elif bid > 0:
+            mid = bid
+        elif ask > 0:
+            mid = ask
+        if mid > 0:
+            return mid
+    except Exception:
+        pass
+    return 0.0
 
 
 def _record_order(symbol: str, exchange: str, side: str, quantity: int, price: float, dry_run: bool, source: str = "manual") -> None:
@@ -877,11 +936,13 @@ def options_expiries(underlying: str):
     try:
         global instruments
         u = (underlying or "").upper()
+        name_alias = {"SENSEX": "SENSEX", "BSESENSEX": "SENSEX", "NIFTY": "NIFTY", "BANKNIFTY": "BANKNIFTY", "FINNIFTY": "FINNIFTY"}
+        u_name = name_alias.get(u, u)
         now_ms = int(time.time() * 1000)
         cached = _expiries_cache.get(u)
         if cached and now_ms - int(cached.get("ts", 0)) < 60 * 60 * 1000:
             return cached.get("data", [])
-        exps = sorted({i.expiry for i in instruments if i.exchange in {"NFO", "BFO"} and (i.name or "").upper() == u and i.instrument_type in {"CE", "PE"} and i.expiry})
+        exps = sorted({i.expiry for i in instruments if i.exchange in {"NFO", "BFO"} and (i.name or "").upper() == u_name and i.instrument_type in {"CE", "PE"} and i.expiry})
         # If empty, try refreshing instruments from broker
         if not exps:
             try:
@@ -910,8 +971,11 @@ def options_chain(underlying: str, expiry: str, count: int = 10, around: float |
     try:
         global instruments
         u = (underlying or "").upper()
+        # Map index names that differ in instruments 'name'
+        name_alias = {"SENSEX": "SENSEX", "NIFTY": "NIFTY", "BANKNIFTY": "BANKNIFTY", "FINNIFTY": "FINNIFTY", "BSESENSEX": "SENSEX"}
+        u_name = name_alias.get(u, u)
         exp_param = (expiry or "").strip()
-        items_all = [i for i in instruments if i.exchange in {"NFO", "BFO"} and (i.name or "").upper() == u and i.instrument_type in {"CE", "PE"}]
+        items_all = [i for i in instruments if i.exchange in {"NFO", "BFO"} and (i.name or "").upper() == u_name and i.instrument_type in {"CE", "PE"}]
         # support alias 'next' to choose nearest upcoming expiry
         if exp_param.lower() == "next" or exp_param == "":
             try:
@@ -939,7 +1003,7 @@ def options_chain(underlying: str, expiry: str, count: int = 10, around: float |
                         writer.writeheader()
                         writer.writerows(data_ins)
                     instruments = load_instruments(str(csv_path))
-                    items_all = [i for i in instruments if i.exchange in {"NFO", "BFO"} and (i.name or "").upper() == u and i.instrument_type in {"CE", "PE"}]
+                    items_all = [i for i in instruments if i.exchange in {"NFO", "BFO"} and (i.name or "").upper() == u_name and i.instrument_type in {"CE", "PE"}]
                     items = [i for i in items_all if (i.expiry or "") == exp_param]
             except Exception:
                 logger.exception("refresh instruments for chain failed")
