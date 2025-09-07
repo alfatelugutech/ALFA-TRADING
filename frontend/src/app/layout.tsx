@@ -39,7 +39,6 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
             <a className="navlink" href="/paper-trading">Paper Trading</a>
             <a className="navlink" href="/options-trading">Options Trading</a>
             <a className="navlink" href="/trade-reports">Trade Reports</a>
-            <a className="navlink" href="/broker-integration">Broker Integration</a>
             <a className="navlink" href="/settings">Settings</a>
           </aside>
           <section className="content">{children}</section>
