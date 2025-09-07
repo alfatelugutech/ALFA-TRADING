@@ -117,6 +117,12 @@ risk_auto_close: bool = False
 # Paper trading account (virtual money)
 paper_start_cash = float(os.getenv("PAPER_STARTING_CASH", "1000000") or 1000000)
 paper_account: Dict[str, float] = {"starting_cash": paper_start_cash, "cash": paper_start_cash}
+paper_risk_per_trade_pct: float = float(os.getenv("PAPER_RISK_PER_TRADE_PCT", "0.01") or 0.01)
+
+# AI trading config
+ai_active: bool = False
+ai_trade_capital: float = float(os.getenv("AI_TRADE_CAPITAL", "10000") or 10000)
+ai_risk_pct: float = float(os.getenv("AI_RISK_PCT", "0.01") or 0.01)
 
 # Auto-schedule
 schedule_cfg: Dict[str, object] = {
@@ -177,18 +183,28 @@ def _on_ticks(ticks: List[dict]) -> None:
             last_strategy_signals = [s.__dict__ for s in signals]
             for s in signals:
                 if cfg.dry_run or not strategy_live:
-                    logger.info("[DRY] Strategy signal %s %s qty=%s", s.side, s.symbol, s.quantity)
-                    _record_order(s.symbol, strategy_exchange, s.side, s.quantity, _get_ltp_for_symbol(strategy_exchange, s.symbol), True, source="strategy")
+                    qty_calc = s.quantity
+                    if ai_active:
+                        price = _get_ltp_for_symbol(strategy_exchange, s.symbol)
+                        if price > 0:
+                            qty_calc = max(1, int(ai_trade_capital / price))
+                    logger.info("[DRY] Strategy signal %s %s qty=%s", s.side, s.symbol, qty_calc)
+                    _record_order(s.symbol, strategy_exchange, s.side, qty_calc, _get_ltp_for_symbol(strategy_exchange, s.symbol), True, source="strategy")
                     continue
                 txn_type = broker.kite.TRANSACTION_TYPE_BUY if s.side == "BUY" else broker.kite.TRANSACTION_TYPE_SELL
                 try:
+                    qty_live = s.quantity
+                    if ai_active:
+                        price = _get_ltp_for_symbol(strategy_exchange, s.symbol)
+                        if price > 0:
+                            qty_live = max(1, int(ai_trade_capital / price))
                     broker.place_market_order(
                         tradingsymbol=s.symbol,
                         exchange=strategy_exchange,
-                        quantity=s.quantity,
+                        quantity=qty_live,
                         transaction_type=txn_type,
                     )
-                    _record_order(s.symbol, strategy_exchange, s.side, s.quantity, _get_ltp_for_symbol(strategy_exchange, s.symbol), False, source="strategy")
+                    _record_order(s.symbol, strategy_exchange, s.side, qty_live, _get_ltp_for_symbol(strategy_exchange, s.symbol), False, source="strategy")
                 except Exception:
                     logger.exception("Order placement failed for %s", s.symbol)
         except Exception:
@@ -863,11 +879,18 @@ def status_all():
             "cash": round(float(paper_account.get("cash", 0.0)), 2),
             "equity": paper.get("equity", 0.0),
             "unrealized": paper.get("unrealized", 0.0),
+            "starting_cash": round(float(paper_account.get("starting_cash", 0.0)), 2),
+            "risk_per_trade_pct": paper_risk_per_trade_pct,
         },
         "strategy": {
             "active": strategy_active,
             "live": strategy_live,
             "exchange": strategy_exchange,
+        },
+        "ai": {
+            "active": ai_active,
+            "trade_capital": ai_trade_capital,
+            "risk_pct": ai_risk_pct,
         },
         "schedule": {"config": schedule_cfg, "state": _schedule_state},
     }
@@ -902,6 +925,22 @@ def paper_reset(body: PaperResetBody):
         order_log = [o for o in order_log if not o.get("dry_run")]
     logger.info("Paper account reset: cash=%.2f clear=%s", new_cash, bool(body.clear_orders))
     return {"cash": round(new_cash, 2), "cleared": bool(body.clear_orders)}
+
+
+class AiConfigBody(BaseModel):
+    active: bool
+    trade_capital: float
+    risk_pct: float
+
+
+@app.post("/ai/config")
+def ai_config(body: AiConfigBody):
+    global ai_active, ai_trade_capital, ai_risk_pct
+    ai_active = bool(body.active)
+    ai_trade_capital = float(body.trade_capital)
+    ai_risk_pct = float(body.risk_pct)
+    logger.info("AI config updated: active=%s cap=%.2f risk=%.4f", ai_active, ai_trade_capital, ai_risk_pct)
+    return {"active": ai_active, "trade_capital": ai_trade_capital, "risk_pct": ai_risk_pct}
 
 
 @app.get("/broker/orders")
