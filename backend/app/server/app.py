@@ -478,6 +478,29 @@ def quote(keys: str):
     items = [k.strip() for k in (keys or "").split(",") if k.strip()]
     if not items:
         return {}
+    out = {}
+    # First try LTP API quickly
+    try:
+        ltp_map = broker.get_ltp({k: k for k in items}) or {}
+        for k in items:
+            v = ltp_map.get(k) or {}
+            price = float(v.get("last_price") or v.get("last_traded_price") or v.get("ltp") or 0)
+            if price > 0:
+                out[k] = price
+    except Exception:
+        pass
+    # Fill remaining with quote()
+    try:
+        missing = [k for k in items if k not in out]
+        if missing:
+            data = broker.kite.quote(missing)
+            for k in missing:
+                v = (data or {}).get(k) or {}
+                price = float(v.get("last_price") or v.get("last_traded_price") or v.get("ltp") or 0)
+                out[k] = price
+    except Exception:
+        logger.exception("quote failed")
+    return out
 
 
 @app.get("/history")
@@ -504,8 +527,9 @@ def history(symbol: Optional[str] = None, exchange: str = "NSE", interval: str =
         tz = ZoneInfo("Asia/Kolkata")
         now = datetime.now(tz)
         # Estimate period
-        step_minutes = {
+        step_minutes_map = {
             "minute": 1,
+            "1minute": 1,
             "3minute": 3,
             "5minute": 5,
             "10minute": 10,
@@ -513,7 +537,8 @@ def history(symbol: Optional[str] = None, exchange: str = "NSE", interval: str =
             "30minute": 30,
             "60minute": 60,
             "day": 60 * 24,
-        }.get(interval, 1)
+        }
+        step_minutes = step_minutes_map.get(interval, 1)
         delta = timedelta(minutes=max(1, step_minutes) * max(1, int(count)))
         start = now - delta
         data = broker.kite.historical_data(token, start, now, interval)
