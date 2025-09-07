@@ -14,6 +14,7 @@ export default function OptionsTrading() {
   const [pe, setPe] = useState<ChainRec[]>([]);
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [qty, setQty] = useState<number>(1);
+  const [offset, setOffset] = useState<number>(0);
 
   const loadExpiries = async () => {
     const data = await (await fetch(`${backendUrl}/options/expiries?underlying=${under}`)).json();
@@ -71,6 +72,17 @@ export default function OptionsTrading() {
         <button className="btn btn-success" onClick={() => placeOrders("BUY")}>BUY</button>
         <button className="btn btn-danger" onClick={() => placeOrders("SELL")}>SELL</button>
         <button className="btn" onClick={addToWatchlist}>Subscribe</button>
+        <input type="number" value={offset} onChange={(e)=>setOffset(Number(e.target.value || 0))} style={{ width: 100, padding: 6 }} />
+        <button className="btn" onClick={async ()=>{
+          const body = { underlying: under, expiry: exp || "next", side: "BUY", quantity: qty, offset };
+          await fetch((process.env.NEXT_PUBLIC_BACKEND_URL || "") + "/options/atm_trade", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+          alert("ATM BUY placed (paper/live based on mode)");
+        }}>ATM BUY</button>
+        <button className="btn" onClick={async ()=>{
+          const body = { underlying: under, expiry: exp || "next", side: "SELL", quantity: qty, offset };
+          await fetch((process.env.NEXT_PUBLIC_BACKEND_URL || "") + "/options/atm_trade", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+          alert("ATM SELL placed (paper/live based on mode)");
+        }}>ATM SELL</button>
       </div>
       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
         <div className="card">

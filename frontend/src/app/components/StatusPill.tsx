@@ -63,7 +63,7 @@ export default function StatusPill() {
       const cap = Number(capStr || 10000);
       const riskPct = Number(riskStr || 1) / 100;
       await fetch(backendUrl + "/ai/config", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ active: true, trade_capital: cap, risk_pct: riskPct }) });
-      await startStrategy();
+      await fetch(backendUrl + "/ai/start", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ strategy: "sma" }) });
       load();
     } catch {}
   };

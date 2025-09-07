@@ -16,6 +16,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
           <StatusPill />
           <nav style={{ display: "flex", gap: 12 }}>
             <a href="/" style={{ color: "var(--fg)", textDecoration: "none" }}>Dashboard</a>
+            <a href="/options-builder" style={{ color: "var(--fg)", textDecoration: "none" }}>Options Builder</a>
             <div style={{ position: "relative" }}>
               <details>
                 <summary style={{ cursor: "pointer" }}>Trading</summary>
