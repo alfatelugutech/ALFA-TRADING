@@ -620,6 +620,19 @@ export default function Home() {
             pushToast("AI config saved", "success");
           }}>Save AI Config</button>
         </div>
+        <div style={{ display: "flex", gap: 8, marginTop: 8 }}>
+          <button className="btn btn-success" onClick={async ()=>{
+            // save + start
+            await fetch(backendUrl + "/ai/config", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ active: true, trade_capital: aiCapital, risk_pct: aiRisk/100 }) });
+            await fetch(backendUrl + "/ai/start", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ strategy: "sma" }) });
+            pushToast("AI trading started", "success");
+          }}>Start AI</button>
+          <button className="btn btn-danger" onClick={async ()=>{
+            await fetch(backendUrl + "/ai/config", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ active: false, trade_capital: aiCapital, risk_pct: aiRisk/100 }) });
+            await fetch(backendUrl + "/strategy/stop", { method: "POST" });
+            pushToast("AI trading stopped", "success");
+          }}>Stop AI</button>
+        </div>
       </section>
 
       <section className="card" style={{ marginTop: 24 }}>
