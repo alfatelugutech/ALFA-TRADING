@@ -202,6 +202,16 @@ def auth_exchange(req: ExchangeRequest):
     return {"access_token": access_token, "instruments": refreshed}
 
 
+@app.get("/auth/profile")
+def auth_profile():
+    try:
+        prof = broker.kite.profile()
+        return {"user_id": prof.get("user_id"), "user_name": prof.get("user_name")}
+    except Exception as e:
+        logger.exception("Profile fetch failed")
+        return {"error": str(e)}
+
+
 @app.websocket("/ws/ticks")
 async def ws_ticks(ws: WebSocket):
     await ws.accept()
