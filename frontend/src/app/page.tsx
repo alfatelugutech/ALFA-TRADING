@@ -4,6 +4,7 @@ export const dynamic = "force-dynamic";
 import { useEffect, useMemo, useRef, useState } from "react";
 import AlertSound from "./components/AlertSound";
 import CandleChart from "./components/CandleChart";
+import IndexMini from "./components/IndexMini";
 
 type Tick = {
   instrument_token: number;
