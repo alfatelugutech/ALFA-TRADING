@@ -56,6 +56,12 @@ class OrderRequest(BaseModel):
     quantity: int = 1
 
 
+class SquareOffBody(BaseModel):
+    symbol: str
+    quantity: int | None = None
+    exchange: str | None = None
+
+
 class ExchangeRequest(BaseModel):
     request_token: str
     refresh_instruments: Optional[bool] = True
@@ -127,6 +133,10 @@ ai_default_symbols: List[str] = [s.strip().upper() for s in (os.getenv("AI_DEFAU
 ai_options_underlyings: List[str] = [s.strip().upper() for s in (os.getenv("AI_OPTIONS_UNDERLYINGS", "NIFTY BANKNIFTY") or "").split()] if os.getenv("AI_OPTIONS_UNDERLYINGS", "NIFTY BANKNIFTY") else []
 ai_options_qty: int = int(os.getenv("AI_OPTIONS_QTY", "1") or 1)
 
+# Trailing stop
+trailing_stop_pct: float = float(os.getenv("TRAILING_STOP_PCT", "0.0") or 0.0)  # 0.02 => 2%
+trailing_state: Dict[str, Dict[str, float]] = {}
+
 # Auto-schedule
 schedule_cfg: Dict[str, object] = {
     "enabled": False,
@@ -184,6 +194,16 @@ def _on_ticks(ticks: List[dict]) -> None:
         try:
             signals = strategy.on_ticks(enriched)
             last_strategy_signals = [s.__dict__ for s in signals]
+            def _strategy_name():
+                try:
+                    if isinstance(strategy, SmaCrossoverStrategy):
+                        return "sma"
+                    if isinstance(strategy, EmaCrossoverStrategy):
+                        return "ema"
+                except Exception:
+                    pass
+                return "unknown"
+            name = _strategy_name()
             for s in signals:
                 if cfg.dry_run or not strategy_live:
                     qty_calc = s.quantity
@@ -192,7 +212,7 @@ def _on_ticks(ticks: List[dict]) -> None:
                         if price > 0:
                             qty_calc = max(1, int(ai_trade_capital / price))
                     logger.info("[DRY] Strategy signal %s %s qty=%s", s.side, s.symbol, qty_calc)
-                    _record_order(s.symbol, strategy_exchange, s.side, qty_calc, _get_ltp_for_symbol(strategy_exchange, s.symbol), True, source="strategy")
+                    _record_order(s.symbol, strategy_exchange, s.side, qty_calc, _get_ltp_for_symbol(strategy_exchange, s.symbol), True, source=("ai-" + name) if ai_active else ("strategy-" + name))
                     continue
                 txn_type = broker.kite.TRANSACTION_TYPE_BUY if s.side == "BUY" else broker.kite.TRANSACTION_TYPE_SELL
                 try:
@@ -207,7 +227,7 @@ def _on_ticks(ticks: List[dict]) -> None:
                         quantity=qty_live,
                         transaction_type=txn_type,
                     )
-                    _record_order(s.symbol, strategy_exchange, s.side, qty_live, _get_ltp_for_symbol(strategy_exchange, s.symbol), False, source="strategy")
+                    _record_order(s.symbol, strategy_exchange, s.side, qty_live, _get_ltp_for_symbol(strategy_exchange, s.symbol), False, source=("ai-" + name) if ai_active else ("strategy-" + name))
                 except Exception:
                     logger.exception("Order placement failed for %s", s.symbol)
         except Exception:
@@ -226,6 +246,17 @@ def _on_ticks(ticks: List[dict]) -> None:
                     _square_off(sym, qty, reason="SL")
                 elif risk_tp_pct > 0 and ltp >= avg * (1.0 + risk_tp_pct):
                     _square_off(sym, qty, reason="TP")
+                # Trailing stop for longs
+                try:
+                    if trailing_stop_pct > 0:
+                        k = f"{strategy_exchange}:{sym}"
+                        st = trailing_state.setdefault(k, {"max": ltp, "min": ltp})
+                        st["max"] = max(st["max"], ltp)
+                        trail = st["max"] * (1.0 - trailing_stop_pct)
+                        if ltp <= trail:
+                            _square_off(sym, qty, reason="TRAIL")
+                except Exception:
+                    pass
         except Exception:
             logger.exception("Auto close evaluation failed")
 
@@ -442,6 +473,15 @@ def _record_order(symbol: str, exchange: str, side: str, quantity: int, price: f
                 paper_account["cash"] = float(paper_account.get("cash", 0.0)) - cost
             elif side == "SELL":
                 paper_account["cash"] = float(paper_account.get("cash", 0.0)) + cost
+        # update trailing stop anchors
+        k = f"{exchange}:{symbol}"
+        if side == "BUY":
+            # Initialize trailing with entry
+            st = trailing_state.setdefault(k, {"max": float(price), "min": float(price)})
+            st["max"] = max(st["max"], float(price))
+        else:
+            st = trailing_state.setdefault(k, {"max": float(price), "min": float(price)})
+            st["min"] = min(st["min"], float(price))
     except Exception:
         logger.exception("paper cash adjust failed")
 
@@ -451,7 +491,8 @@ def _get_holdings() -> Dict[str, dict]:
     holdings: Dict[str, dict] = {}
     for o in order_log:
         qty = o["quantity"] if o["side"] == "BUY" else -o["quantity"]
-        s = holdings.setdefault(o["symbol"], {"quantity": 0, "avg_price": 0.0})
+        s = holdings.setdefault(o["symbol"], {"quantity": 0, "avg_price": 0.0, "exchange": o.get("exchange", strategy_exchange)})
+        s["exchange"] = o.get("exchange", s.get("exchange", strategy_exchange))
         new_qty = s["quantity"] + qty
         if new_qty > 0 and qty > 0:
             # weighted average on buys
@@ -497,14 +538,22 @@ def _square_off(symbol: str, quantity: int, reason: str = "") -> None:
     if quantity <= 0:
         return
     side = "SELL"
+    # choose exchange from holding if known
+    exch = strategy_exchange
+    try:
+        h = _get_holdings().get(symbol)
+        if h and h.get("exchange"):
+            exch = str(h.get("exchange"))
+    except Exception:
+        pass
     if cfg.dry_run:
-        _record_order(symbol, strategy_exchange, side, quantity, _get_ltp_for_symbol(strategy_exchange, symbol), True, source=f"auto-{reason}")
+        _record_order(symbol, exch, side, quantity, _get_ltp_for_symbol(exch, symbol), True, source=f"auto-{reason}")
         logger.info("[AUTO-%s][DRY] Square-off %s qty=%s", reason, symbol, quantity)
         return
     txn_type = broker.kite.TRANSACTION_TYPE_SELL
     try:
-        broker.place_market_order(tradingsymbol=symbol, exchange=strategy_exchange, quantity=quantity, transaction_type=txn_type)
-        _record_order(symbol, strategy_exchange, side, quantity, _get_ltp_for_symbol(strategy_exchange, symbol), False, source=f"auto-{reason}")
+        broker.place_market_order(tradingsymbol=symbol, exchange=exch, quantity=quantity, transaction_type=txn_type)
+        _record_order(symbol, exch, side, quantity, _get_ltp_for_symbol(exch, symbol), False, source=f"auto-{reason}")
         logger.info("[AUTO-%s] Square-off %s qty=%s", reason, symbol, quantity)
     except Exception:
         logger.exception("Square-off failed for %s", symbol)
@@ -630,15 +679,34 @@ def pnl():
     return {"realized": round(realized, 2), "unrealized": round(unrealized, 2)}
 
 
+@app.get("/reports/strategy")
+def report_strategy():
+    # Aggregate orders by source (strategy) and side pairs
+    stats: Dict[str, Dict[str, float]] = {}
+    for o in order_log:
+        src = str(o.get("source", "unknown"))
+        s = stats.setdefault(src, {"trades": 0, "buy": 0.0, "sell": 0.0, "profit": 0.0})
+        s["trades"] += 1
+        amt = float(o.get("price", 0.0)) * int(o.get("quantity", 0))
+        if o.get("side") == "BUY":
+            s["buy"] += amt
+        else:
+            s["sell"] += amt
+    for k, v in stats.items():
+        v["profit"] = round(v["sell"] - v["buy"], 2)
+    return stats
+
+
 class RiskConfig(BaseModel):
     sl_pct: float = 0.02
     tp_pct: float = 0.0
     auto_close: bool = False
+    trailing_stop_pct: float = 0.0
 
 
 @app.get("/risk")
 def get_risk():
-    return {"sl_pct": risk_sl_pct, "tp_pct": risk_tp_pct, "auto_close": risk_auto_close}
+    return {"sl_pct": risk_sl_pct, "tp_pct": risk_tp_pct, "auto_close": risk_auto_close, "trailing_stop_pct": trailing_stop_pct}
 
 
 @app.post("/risk")
@@ -647,6 +715,8 @@ def set_risk(cfg_req: RiskConfig):
     risk_sl_pct = float(cfg_req.sl_pct)
     risk_tp_pct = float(cfg_req.tp_pct)
     risk_auto_close = bool(cfg_req.auto_close)
+    global trailing_stop_pct
+    trailing_stop_pct = float(cfg_req.trailing_stop_pct)
     logger.info("Risk updated sl=%.4f tp=%.4f auto=%s", risk_sl_pct, risk_tp_pct, risk_auto_close)
     return get_risk()
 
@@ -672,6 +742,9 @@ async def _scheduler_loop():
                 # START
                 if _schedule_state.get("started_on") != today_key and now.time() >= start_t:
                     sym = [str(s).upper() for s in (schedule_cfg.get("symbols") or [])]
+                    # Fallback to AI defaults if no symbols configured
+                    if not sym:
+                        sym = ai_default_symbols
                     if sym:
                         if schedule_cfg.get("strategy") == "ema":
                             strategy_ema_start(EmaStartRequest(
@@ -759,13 +832,41 @@ def positions():
         if qty <= 0:
             continue
         avg = float(h.get("avg_price", 0.0))
-        ltp = _get_ltp_for_symbol(strategy_exchange, sym)
+        exch = str(h.get("exchange", strategy_exchange))
+        ltp = _get_ltp_for_symbol(exch, sym)
         pnl_u = (ltp - avg) * qty
-        out.append({"symbol": sym, "quantity": qty, "avg_price": round(avg, 2), "ltp": round(ltp, 2), "unrealized": round(pnl_u, 2)})
+        out.append({"symbol": sym, "exchange": exch, "quantity": qty, "avg_price": round(avg, 2), "ltp": round(ltp, 2), "unrealized": round(pnl_u, 2)})
     # include paper account summary row (as meta)
     paper = _paper_equity_and_unrealized()
     meta = {"paper_cash": round(float(paper_account.get("cash", 0.0)), 2), "paper_equity": paper.get("equity", 0.0), "paper_unrealized": paper.get("unrealized", 0.0)}
     return {"positions": out, "paper": meta}
+
+
+@app.post("/squareoff")
+def squareoff(body: SquareOffBody):
+    holds = _get_holdings()
+    sym = str(body.symbol).upper()
+    h = holds.get(sym)
+    if not h or int(h.get("quantity", 0)) <= 0:
+        return {"status": "no_position"}
+    qty = int(body.quantity) if body.quantity is not None else int(h.get("quantity", 0))
+    qty = max(0, min(qty, int(h.get("quantity", 0))))
+    if qty <= 0:
+        return {"status": "noop"}
+    _square_off(sym, qty, reason="MANUAL")
+    return {"status": "ok", "symbol": sym, "quantity": qty}
+
+
+@app.post("/squareoff/all")
+def squareoff_all():
+    holds = _get_holdings()
+    done = []
+    for sym, h in holds.items():
+        qty = int(h.get("quantity", 0))
+        if qty > 0:
+            _square_off(sym, qty, reason="ALL")
+            done.append({"symbol": sym, "quantity": qty})
+    return {"count": len(done), "closed": done}
 
 
 _expiries_cache: Dict[str, dict] = {}
