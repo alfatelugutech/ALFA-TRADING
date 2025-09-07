@@ -44,9 +44,10 @@ export default function CandleChart({ symbol, exchange = "NSE" }: { symbol: stri
       <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 6 }}>
         <b>{symbol} • {interval}</b>
         <select value={interval} onChange={(e)=>setIntervalStr(e.target.value)}>
-          <option value="1minute">1m</option>
+          <option value="minute">1m</option>
           <option value="3minute">3m</option>
           <option value="5minute">5m</option>
+          <option value="10minute">10m</option>
           <option value="15minute">15m</option>
           <option value="30minute">30m</option>
           <option value="60minute">60m</option>

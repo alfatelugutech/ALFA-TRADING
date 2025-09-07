@@ -77,7 +77,11 @@ export default function MarketData() {
 
   const rows = useMemo(() => {
     const allow = new Set(symbols.split(/\s+/).filter(Boolean).map((s) => s.toUpperCase()));
-    return ticks
+    const merged: Tick[] = [...ticks];
+    if (chartSym && chartPrices.length) {
+      merged.push({ instrument_token: 0, ltp: chartPrices[chartPrices.length - 1], symbol: chartSym });
+    }
+    return merged
       .filter((t) => !allow.size || (t.symbol ? allow.has(String(t.symbol).toUpperCase()) : true))
       .slice(0, 200)
       .map((t) => {
@@ -127,6 +131,10 @@ export default function MarketData() {
         </div>
         {chartSym && (
           <div style={{ width: "100%", height: 180 }}>
+            <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 6, fontSize: 14 }}>
+              <b>{chartSym}</b>
+              <span>Price: {chartPrices.length ? Number(chartPrices[chartPrices.length-1]).toFixed(2) : "-"} · Updated: {chartTimes[chartTimes.length-1] || "-"}</span>
+            </div>
             <svg viewBox="0 0 600 180" preserveAspectRatio="none" style={{ width: "100%", height: 180 }}>
               <polyline fill="none" stroke="#60a5fa" strokeWidth="2" points={chartPrices.map((p, i) => `${(i/(Math.max(1,chartPrices.length-1)))*600},${180 - ((p - Math.min(...chartPrices)) / Math.max(1,(Math.max(...chartPrices)-Math.min(...chartPrices)))) * 160 - 10}`).join(" ")} />
             </svg>
