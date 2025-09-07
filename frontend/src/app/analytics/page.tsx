@@ -13,11 +13,15 @@ export default function Analytics() {
   const load = async () => {
     setLoading(true);
     try {
-      const o = await (await fetch(backendUrl + "/orders")).json();
-      const p = await (await fetch(backendUrl + "/pnl")).json();
+      const oResp = await fetch(backendUrl + "/orders");
+      const o = await oResp.json();
       setOrders(Array.isArray(o) ? o : []);
+    } catch { setOrders([]); }
+    try {
+      const pResp = await fetch(backendUrl + "/pnl");
+      const p = await pResp.json();
       setPnl(p);
-    } catch {}
+    } catch { setPnl(null); }
     setLoading(false);
   };
 

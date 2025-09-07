@@ -10,8 +10,14 @@ export default function Portfolio() {
   const [pnl, setPnl] = useState<{ realized: number; unrealized: number } | null>(null);
 
   const load = async () => {
-    setPositions(await (await fetch(backendUrl + "/positions")).json());
-    setPnl(await (await fetch(backendUrl + "/pnl")).json());
+    try {
+      const pos = await (await fetch(backendUrl + "/positions")).json();
+      setPositions(Array.isArray(pos) ? pos : []);
+    } catch { setPositions([]); }
+    try {
+      const p = await (await fetch(backendUrl + "/pnl")).json();
+      setPnl(p);
+    } catch { setPnl(null); }
   };
 
   useEffect(() => {
@@ -54,9 +60,9 @@ export default function Portfolio() {
             <tr key={p.symbol}>
               <td>{p.symbol}</td>
               <td style={{ textAlign: "right" }}>{p.quantity}</td>
-              <td style={{ textAlign: "right" }}>{p.avg_price.toFixed(2)}</td>
-              <td style={{ textAlign: "right" }}>{p.ltp.toFixed(2)}</td>
-              <td style={{ textAlign: "right", color: p.unrealized >= 0 ? "#0a0" : "#a00" }}>{p.unrealized.toFixed(2)}</td>
+              <td style={{ textAlign: "right" }}>{Number(p.avg_price || 0).toFixed(2)}</td>
+              <td style={{ textAlign: "right" }}>{Number(p.ltp || 0).toFixed(2)}</td>
+              <td style={{ textAlign: "right", color: (p.unrealized || 0) >= 0 ? "#0a0" : "#a00" }}>{Number(p.unrealized || 0).toFixed(2)}</td>
             </tr>
           ))}
         </tbody>
