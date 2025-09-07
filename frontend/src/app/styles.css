@@ -56,3 +56,10 @@
 .table tbody tr:nth-child(odd) { background: color-mix(in oklab, var(--card) 70%, var(--bg)); }
 .table tbody tr:hover { background: color-mix(in oklab, var(--card) 85%, var(--bg)); }
 
+.shell { display: grid; grid-template-columns: 240px 1fr; gap: 16px; max-width: 1280px; margin: 0 auto; padding: 0 12px 24px; }
+.sidebar { background: var(--card); border: 1px solid var(--border); border-radius: 10px; padding: 12px; position: sticky; top: 76px; height: calc(100vh - 100px); overflow: auto; }
+.content { min-height: 100vh; }
+.navlink { display: block; padding: 8px 10px; border-radius: 8px; color: var(--fg); text-decoration: none; margin-bottom: 4px; }
+.navlink:hover { background: color-mix(in oklab, var(--card) 85%, var(--bg)); }
+.navlink.active { background: var(--primary); color: #fff; }
+

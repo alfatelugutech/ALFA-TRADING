@@ -56,6 +56,16 @@ export default function Home() {
   const [optCount, setOptCount] = useState<number>(10);
   const [expiries, setExpiries] = useState<string[]>([]);
   const [chain, setChain] = useState<{ ce: ChainRec[]; pe: ChainRec[]; strikes: number[] }>({ ce: [], pe: [], strikes: [] });
+  // Scheduler
+  const [schedEnabled, setSchedEnabled] = useState<boolean>(false);
+  const [schedStrategy, setSchedStrategy] = useState<string>("sma");
+  const [schedShort, setSchedShort] = useState<number>(20);
+  const [schedLong, setSchedLong] = useState<number>(50);
+  const [schedLive, setSchedLive] = useState<boolean>(false);
+  const [schedStart, setSchedStart] = useState<string>("09:15");
+  const [schedStop, setSchedStop] = useState<string>("15:25");
+  const [schedSquare, setSchedSquare] = useState<boolean>(true);
+  const [schedSymbols, setSchedSymbols] = useState<string>("");
 
   useEffect(() => {
     const ws = new WebSocket(backendUrl.replace(/^http/, "ws") + "/ws/ticks");
@@ -87,6 +97,22 @@ export default function Home() {
       .then((r) => r.json())
       .then((d) => setStatus(d))
       .catch(() => setStatus(null));
+    // Load schedule
+    fetch(backendUrl + "/schedule")
+      .then((r) => r.json())
+      .then((d) => {
+        const c = d?.config || {};
+        setSchedEnabled(!!c.enabled);
+        setSchedStrategy(c.strategy || "sma");
+        setSchedShort(Number(c.short || 20));
+        setSchedLong(Number(c.long || 50));
+        setSchedLive(!!c.live);
+        setSchedStart(c.start || "09:15");
+        setSchedStop(c.stop || "15:25");
+        setSchedSquare(!!c.square_off_eod);
+        setSchedSymbols((c.symbols || []).join(" "));
+      })
+      .catch(() => {});
   }, []);
 
   // Initialize watchlist from localStorage (or default from symbols input)
@@ -483,6 +509,87 @@ export default function Home() {
           </tbody>
         </table>
         <div style={{ marginTop: 6, fontSize: 12 }}>Showing last {Math.min(orders.length, 100)} orders</div>
+      </section>
+
+      {/* Auto Trading Schedule */}
+      <section className="card" style={{ marginTop: 24 }}>
+        <h3>Auto Trading Schedule</h3>
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(6, 1fr)", gap: 8 }}>
+          <label style={{ display: "flex", alignItems: "center", gap: 6 }}>
+            <input type="checkbox" checked={schedEnabled} onChange={(e) => setSchedEnabled(e.target.checked)} /> Enabled
+          </label>
+          <select value={schedStrategy} onChange={(e) => setSchedStrategy(e.target.value)}>
+            <option value="sma">SMA</option>
+            <option value="ema">EMA</option>
+          </select>
+          <input value={schedShort} onChange={(e) => setSchedShort(Number(e.target.value || 20))} placeholder="Short" />
+          <input value={schedLong} onChange={(e) => setSchedLong(Number(e.target.value || 50))} placeholder="Long" />
+          <label style={{ display: "flex", alignItems: "center", gap: 6 }}>
+            <input type="checkbox" checked={schedLive} onChange={(e) => setSchedLive(e.target.checked)} /> Live
+          </label>
+          <div />
+          <input value={schedStart} onChange={(e) => setSchedStart(e.target.value)} placeholder="Start HH:MM" />
+          <input value={schedStop} onChange={(e) => setSchedStop(e.target.value)} placeholder="Stop HH:MM" />
+          <label style={{ display: "flex", alignItems: "center", gap: 6 }}>
+            <input type="checkbox" checked={schedSquare} onChange={(e) => setSchedSquare(e.target.checked)} /> Square-off EOD
+          </label>
+          <input
+            value={schedSymbols}
+            onChange={(e) => setSchedSymbols(e.target.value)}
+            placeholder="Symbols (space separated)"
+            style={{ gridColumn: "1 / span 6" }}
+          />
+        </div>
+        <div style={{ display: "flex", gap: 8, marginTop: 8 }}>
+          <button
+            className="btn btn-primary"
+            onClick={async () => {
+              await fetch(backendUrl + "/schedule", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                  enabled: schedEnabled,
+                  strategy: schedStrategy,
+                  symbols: schedSymbols.split(/\s+/).filter(Boolean),
+                  exchange,
+                  short: schedShort,
+                  long: schedLong,
+                  live: schedLive,
+                  start: schedStart,
+                  stop: schedStop,
+                  square_off_eod: schedSquare,
+                }),
+              });
+              pushToast("Schedule saved", "success");
+            }}
+          >
+            Save Schedule
+          </button>
+          <button
+            className="btn btn-success"
+            onClick={async () => {
+              const list = schedSymbols.split(/\s+/).filter(Boolean);
+              if (!list.length) { pushToast("No symbols", "error"); return; }
+              if (schedStrategy === "ema") {
+                await fetch(backendUrl + "/strategy/ema/start", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ symbols: list, exchange, short: schedShort, long: schedLong, live: schedLive }) });
+              } else {
+                await fetch(backendUrl + "/strategy/sma/start", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ symbols: list, exchange, short: schedShort, long: schedLong, live: schedLive }) });
+              }
+              pushToast("Strategy started", "success");
+            }}
+          >
+            Start Now
+          </button>
+          <button
+            className="btn btn-danger"
+            onClick={async () => {
+              await fetch(backendUrl + "/strategy/stop", { method: "POST" });
+              pushToast("Strategy stopped", "success");
+            }}
+          >
+            Stop Now
+          </button>
+        </div>
       </section>
 
       <section className="card" style={{ marginTop: 24 }}>
