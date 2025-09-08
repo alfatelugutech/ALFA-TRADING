@@ -20,10 +20,15 @@ type AIRecommendation = {
   stop_loss?: number;
 };
 
-const backendUrl = process.env.NEXT_PUBLIC_BACKEND_URL || "http://localhost:10000";
+const backendUrl = (process.env.NEXT_PUBLIC_BACKEND_URL || (typeof window !== "undefined" ? window.location.origin : "")) as string;
 
 export default function AITradingPage() {
-  // Page disabled per request; keep minimal shell to avoid route errors
+  const [aiActive, setAiActive] = useState<boolean>(false);
+  const [aiCapital, setAiCapital] = useState<number>(100000);
+  const [aiRisk, setAiRisk] = useState<number>(2);
+  const [selectedStrategy, setSelectedStrategy] = useState<string>("sma");
+  const [recommendations, setRecommendations] = useState<AIRecommendation[]>([]);
+  const [aiPerformance, setAIPerformance] = useState<any>(null);
   const [toasts, setToasts] = useState<{ id: number; text: string; kind: "info" | "success" | "error" }[]>([]);
 
   const strategies: AIStrategy[] = [
@@ -106,7 +111,11 @@ export default function AITradingPage() {
     }
   };
 
-  useEffect(() => {}, []);
+  useEffect(() => {
+    loadAIStatus();
+    loadRecommendations();
+    loadPerformance();
+  }, []);
 
   const saveAIConfig = async () => {
     try {
@@ -176,7 +185,52 @@ export default function AITradingPage() {
   return (
     <main>
       <h2>AI Trading</h2>
-      <p>This feature has been disabled.</p>
+      <div className="card" style={{ display: "grid", gridTemplateColumns: "repeat(2, 1fr)", gap: 12 }}>
+        <label style={{ display: "flex", alignItems: "center", gap: 6 }}>
+          <input type="checkbox" checked={aiActive} onChange={(e)=>setAiActive(e.target.checked)} /> Active
+        </label>
+        <select value={selectedStrategy} onChange={(e)=>setSelectedStrategy(e.target.value)}>
+          <option value="sma">SMA Crossover</option>
+          <option value="ema">EMA Momentum</option>
+          <option value="rsi">RSI Mean Reversion</option>
+          <option value="bollinger">Bollinger Bands</option>
+          <option value="multi_factor_ai">Multi-Factor AI</option>
+        </select>
+        <input type="number" value={aiCapital} onChange={(e)=>setAiCapital(Number(e.target.value || 0))} placeholder="Trading capital (₹)" />
+        <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+          <input type="number" value={aiRisk} onChange={(e)=>setAiRisk(Number(e.target.value || 0))} placeholder="Risk %" /> % per trade
+        </div>
+        <div style={{ gridColumn: "1 / span 2", display: "flex", gap: 8 }}>
+          <button className="btn" onClick={saveAIConfig}>Save Config</button>
+          <button className="btn btn-success" onClick={startAI}>Start AI</button>
+          <button className="btn btn-danger" onClick={stopAI}>Stop AI</button>
+        </div>
+      </div>
+
+      <div className="card" style={{ marginTop: 16 }}>
+        <h3>AI Recommendations</h3>
+        {recommendations.length ? (
+          <ul>
+            {recommendations.map((r, i) => (
+              <li key={i} style={{ display: "flex", justifyContent: "space-between", padding: 6, borderBottom: "1px solid #eee" }}>
+                <span>{r.symbol}</span>
+                <span style={{ fontWeight: 600 }}>{r.action}</span>
+                <span style={{ color: "#666" }}>{Math.round((r.confidence || 0) * 100)}%</span>
+              </li>
+            ))}
+          </ul>
+        ) : (
+          <div style={{ color: "#666" }}>No recommendations</div>
+        )}
+      </div>
+
+      <div style={{ position: "fixed", top: 16, right: 16, display: "flex", flexDirection: "column", gap: 8 }}>
+        {toasts.map((t)=> (
+          <div key={t.id} style={{ background: t.kind === "error" ? "#fee2e2" : t.kind === "success" ? "#dcfce7" : "#e5e7eb", color: "#111", padding: "8px 12px", borderRadius: 8, boxShadow: "0 2px 6px rgba(0,0,0,0.15)", minWidth: 220 }}>
+            {t.text}
+          </div>
+        ))}
+      </div>
     </main>
   );
 }
