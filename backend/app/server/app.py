@@ -85,6 +85,11 @@ broker = ZerodhaClient(api_key=cfg.zerodha_api_key, api_secret=cfg.zerodha_api_s
 
 def _load_or_download_instruments() -> list:
     csv_path = Path(cfg.instruments_csv_path)
+    # In demo mode (Render/GitHub with demo_key), avoid download attempts and use in-memory demo instruments
+    if cfg.zerodha_api_key == "demo_key":
+        logger.info("Demo mode detected (ZERODHA_API_KEY=demo_key). Using in-memory demo instruments.")
+        return _create_demo_instruments()
+
     try:
         return load_instruments(str(csv_path))
     except FileNotFoundError:
@@ -92,8 +97,8 @@ def _load_or_download_instruments() -> list:
         try:
             data = broker.instruments()
             if not data:
-                logger.error("Broker returned no instruments. Skipping write.")
-                return []
+                logger.warning("Broker returned no instruments. Falling back to demo instruments in-memory.")
+                return _create_demo_instruments()
             csv_path.parent.mkdir(parents=True, exist_ok=True)
             with csv_path.open("w", newline="", encoding="utf-8") as f:
                 writer = csv.DictWriter(f, fieldnames=data[0].keys())
@@ -101,8 +106,9 @@ def _load_or_download_instruments() -> list:
                 writer.writerows(data)
             logger.info("Instruments downloaded: %s entries", len(data))
             return load_instruments(str(csv_path))
-        except Exception:
-            logger.exception("Failed to download instruments. Using demo instruments for GitHub environment.")
+        except Exception as e:
+            # Avoid noisy traceback in managed environments; fall back silently
+            logger.warning("Instruments download failed (%s). Using in-memory demo instruments.", str(e))
             return _create_demo_instruments()
 
 
@@ -202,6 +208,8 @@ ai_analyzer = AIMarketAnalyzer()
 
 # Trailing stop
 trailing_stop_pct: float = float(os.getenv("TRAILING_STOP_PCT", "0.0") or 0.0)  # 0.02 => 2%
+# Absolute trailing distance in points (moves 1:1 with price once active)
+trailing_stop_points: float = float(os.getenv("TRAILING_STOP_POINTS", "10") or 10.0)
 trailing_state: Dict[str, Dict[str, float]] = {}
 trailing_overrides_pct: Dict[str, float] = {}  # key: EXCHANGE:SYMBOL -> pct
 
@@ -291,6 +299,16 @@ def _on_ticks(ticks: List[dict]) -> None:
                         price = _get_ltp_for_symbol(strategy_exchange, s.symbol)
                         if price > 0:
                             qty_calc = max(1, int(ai_trade_capital / price))
+                    # If options symbol, convert qty_calc lots -> contracts when small integers are used
+                    if ("CE" in s.symbol or "PE" in s.symbol) and qty_calc in {1, 2, 3, 4, 5, 10}:
+                        lot = 75
+                        if "BANKNIFTY" in s.symbol:
+                            lot = 35
+                        elif "SENSEX" in s.symbol:
+                            lot = 20
+                        elif "FINNIFTY" in s.symbol:
+                            lot = 40
+                        qty_calc = qty_calc * lot
                     logger.info("[DRY] Strategy signal %s %s qty=%s", s.side, s.symbol, qty_calc)
                     _record_order(s.symbol, strategy_exchange, s.side, qty_calc, _get_ltp_for_symbol(strategy_exchange, s.symbol), True, source=("ai-" + name) if ai_active else ("strategy-" + name))
                     continue
@@ -301,6 +319,16 @@ def _on_ticks(ticks: List[dict]) -> None:
                         price = _get_ltp_for_symbol(strategy_exchange, s.symbol)
                         if price > 0:
                             qty_live = max(1, int(ai_trade_capital / price))
+                    # Convert lots to contracts for options in live as well
+                    if ("CE" in s.symbol or "PE" in s.symbol) and qty_live in {1, 2, 3, 4, 5, 10}:
+                        lot_l = 75
+                        if "BANKNIFTY" in s.symbol:
+                            lot_l = 35
+                        elif "SENSEX" in s.symbol:
+                            lot_l = 20
+                        elif "FINNIFTY" in s.symbol:
+                            lot_l = 40
+                        qty_live = qty_live * lot_l
                     broker.place_market_order(
                         tradingsymbol=s.symbol,
                         exchange=strategy_exchange,
@@ -326,17 +354,34 @@ def _on_ticks(ticks: List[dict]) -> None:
                     _square_off(sym, qty, reason="SL")
                 elif risk_tp_pct > 0 and ltp >= avg * (1.0 + risk_tp_pct):
                     _square_off(sym, qty, reason="TP")
-                # Trailing stop for longs
+                # Trailing stop logic
                 try:
                     # choose per-symbol override if set
                     k = f"{strategy_exchange}:{sym}"
                     pct = float(trailing_overrides_pct.get(k, trailing_stop_pct))
-                    if pct > 0:
-                        st = trailing_state.setdefault(k, {"max": ltp, "min": ltp})
-                        st["max"] = max(st["max"], ltp)
-                        trail = st["max"] * (1.0 - pct)
-                        if ltp <= trail:
-                            _square_off(sym, qty, reason="TRAIL")
+                    st = trailing_state.setdefault(k, {"max": ltp, "min": ltp, "trail_price": 0.0})
+                    # Update running extremes for both sides
+                    if qty > 0:
+                        # Long position: move max up and compute trailing by pct or points
+                        st["max"] = max(st.get("max", ltp), ltp)
+                        trail_pct = st["max"] * (1.0 - max(0.0, pct)) if pct > 0 else None
+                        trail_pts = st["max"] - max(0.0, trailing_stop_points)
+                        # choose the tighter stop if both configured
+                        candidates = [v for v in [trail_pct, trail_pts] if v and v > 0]
+                        if candidates:
+                            st["trail_price"] = max(candidates)
+                            if ltp <= st["trail_price"]:
+                                _square_off(sym, qty, reason="TRAIL")
+                    elif qty < 0:
+                        # Short position: move min down and compute trailing
+                        st["min"] = min(st.get("min", ltp), ltp)
+                        trail_pct = st["min"] * (1.0 + max(0.0, pct)) if pct > 0 else None
+                        trail_pts = st["min"] + max(0.0, trailing_stop_points)
+                        candidates = [v for v in [trail_pct, trail_pts] if v and v > 0]
+                        if candidates:
+                            st["trail_price"] = min(candidates)
+                            if ltp >= st["trail_price"]:
+                                _square_off(sym, -qty, reason="TRAIL")
                 except Exception:
                     pass
         except Exception:
@@ -399,18 +444,35 @@ def unsubscribe(req: SubscribeRequest):
 @app.post("/order")
 def order(req: OrderRequest):
     side = req.side.upper()
+    # Auto-derive lot-sized quantity for options: if symbol ends with CE/PE and quantity equals 1 lot(s)
+    qty = int(req.quantity)
+    symu = req.symbol.upper()
+    exch = req.exchange.upper()
+    if ("CE" in symu or "PE" in symu):
+        # If user passes small qty like 1, interpret as lots; multiply to exchange lot size if known
+        # Basic defaults by underlying; can be extended per instruments
+        lot = 75
+        if "BANKNIFTY" in symu:
+            lot = 35
+        elif "SENSEX" in symu:
+            lot = 20
+        elif "FINNIFTY" in symu:
+            lot = 40
+        # Treat qty <= lot as lots when clearly not already multiples of lot
+        if qty in {1, 2, 3, 4, 5, 10}:
+            qty = qty * lot
     txn_type = broker.kite.TRANSACTION_TYPE_BUY if side == "BUY" else broker.kite.TRANSACTION_TYPE_SELL
     if cfg.dry_run:
-        logger.info("[DRY] %s %s qty=%s", side, req.symbol, req.quantity)
-        _record_order(req.symbol, req.exchange, side, req.quantity, _get_ltp_for_symbol(req.exchange, req.symbol), True, source="manual")
+        logger.info("[DRY] %s %s qty=%s", side, req.symbol, qty)
+        _record_order(req.symbol, exch, side, qty, _get_ltp_for_symbol(exch, req.symbol), True, source="manual")
         return {"dry_run": True, "status": "ok"}
     resp = broker.place_market_order(
         tradingsymbol=req.symbol,
-        exchange=req.exchange,
-        quantity=req.quantity,
+        exchange=exch,
+        quantity=qty,
         transaction_type=txn_type,
     )
-    _record_order(req.symbol, req.exchange, side, req.quantity, _get_ltp_for_symbol(req.exchange, req.symbol), False, source="manual")
+    _record_order(req.symbol, exch, side, qty, _get_ltp_for_symbol(exch, req.symbol), False, source="manual")
     return resp
 
 
@@ -436,7 +498,7 @@ def auth_exchange(req: ExchangeRequest):
     ticker = None
     # Optionally refresh instruments
     refreshed = 0
-    if req.refresh_instruments:
+    if req.refresh_instruments and cfg.zerodha_api_key != "demo_key":
         try:
             data_ins = broker.instruments()
             if data_ins:
@@ -1513,7 +1575,7 @@ def options_expiries(underlying: str):
             return cached.get("data", [])
         exps = sorted({i.expiry for i in instruments if i.exchange in {"NFO", "BFO"} and (i.name or "").upper() == u_name and i.instrument_type in {"CE", "PE"} and i.expiry})
         # If empty, try refreshing instruments from broker
-        if not exps:
+        if not exps and cfg.zerodha_api_key != "demo_key":
             try:
                 data_ins = broker.instruments()
                 if data_ins:
@@ -1560,7 +1622,7 @@ def options_chain(underlying: str, expiry: str, count: int = 10, around: float |
             except Exception:
                 pass
         items = [i for i in items_all if (i.expiry or "") == exp_param]
-        if not items:
+        if not items and cfg.zerodha_api_key != "demo_key":
             # attempt refresh
             try:
                 data_ins = broker.instruments()
