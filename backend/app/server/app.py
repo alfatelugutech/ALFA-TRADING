@@ -677,6 +677,17 @@ def _get_ltp_for_symbol(exchange: str, symbol: str) -> float:
     except Exception:
         pass
     
+    # 1b) Fallback to broker LTP API for consistent pricing (equity/options)
+    try:
+        q = broker.kite.ltp(f"{exchange}:{symbol}")
+        key = f"{exchange}:{symbol}"
+        if q and key in q:
+            last = float(q[key].get("last_price") or q[key].get("last_traded_price") or 0)
+            if last > 0:
+                return last
+    except Exception:
+        pass
+    
     # 2) Demo mode - return mock prices
     if cfg.zerodha_api_key == "demo_key":
         demo_prices = {
@@ -1735,6 +1746,27 @@ def ai_start_trading(req: AIStartRequest, background_tasks: BackgroundTasks):
         ai_trade_capital = req.capital
         ai_active = True
         
+        # Resolve and subscribe to default AI symbols so the AI gets live ticks
+        try:
+            syms = ai_default_symbols or [
+                "RELIANCE", "TCS", "INFY", "HDFCBANK", "ICICIBANK",
+                "KOTAKBANK", "HINDUNILVR", "ITC", "BHARTIARTL", "SBIN"
+            ]
+            mapping = resolve_tokens_by_symbols(instruments, syms, exchange="NSE")
+            if mapping:
+                symbol_to_token.update(mapping)
+                token_to_symbol.update({v: k for k, v in mapping.items()})
+                ensure_ticker(mode_full=False)
+                if ticker:
+                    try:
+                        ticker.subscribe(list(mapping.values()))
+                    except Exception:
+                        logger.exception("Ticker subscribe failed for AI symbols")
+            else:
+                logger.warning("AI start: no tokens resolved for symbols %s", syms)
+        except Exception:
+            logger.exception("AI start: symbol resolution failed")
+
         # Initialize AI engine
         ai_engine = AITradingEngine(
             broker_client=broker,
