@@ -25,7 +25,6 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
                   <div className="card menu menu-left">
                     <a href="/market-data">Live Market Data</a>
                     <a href="/analytics">Analytics</a>
-                    <a href="/trade-reports">Reports</a>
                   </div>
                 </details>
               </div>
@@ -41,15 +40,21 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
               </div>
               <div className="dropdown">
                 <details>
+                  <summary>Reports ▾</summary>
+                  <div className="card menu menu-left">
+                    <a href="/reports/portfolio">📊 Portfolio (Live) Reports</a>
+                    <a href="/reports/paper-trading">📄 Paper Trading Reports</a>
+                    <a href="/reports/manual-trading">🧭 Manual Trading Reports</a>
+                  </div>
+                </details>
+              </div>
+              <div className="dropdown">
+                <details>
                   <summary>Trading ▾</summary>
                   <div className="card menu menu-left">
                     <a href="/paper-trading">📄 Paper Trading</a>
                     <a href="/trading-dashboard">🧭 Manual Trading</a>
                     <a href="/ai-trading">🤖 AI Trading</a>
-                    <a href="/orders">📋 Order Management</a>
-                    <a href="/strategy-builder">📈 Strategy Builder</a>
-                    <a href="/risk">🛡️ Risk Management</a>
-                    <a href="/portfolio">💼 Portfolio</a>
                   </div>
                 </details>
               </div>
