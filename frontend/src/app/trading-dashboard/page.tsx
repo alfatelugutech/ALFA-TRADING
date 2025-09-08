@@ -1,7 +1,9 @@
 "use client";
 
 import { useEffect, useState, useRef } from "react";
-import CandleChart from "../components/CandleChart";
+import dynamic from "next/dynamic";
+// Lazy-load CandleChart to isolate any rendering issues
+const CandleChart = dynamic(() => import("../components/CandleChart"), { ssr: false });
 
 type Tick = {
   instrument_token: number;
@@ -44,6 +46,8 @@ type PnLState = {
 const backendUrl = process.env.NEXT_PUBLIC_BACKEND_URL || "";
 
 export default function TradingDashboard() {
+  // Local error boundary to prevent full-page crash
+  // Note: React class components can't be defined inside a component, so we use try/catch guards in effects and rendering helpers
   const [activeTab, setActiveTab] = useState<"overview" | "positions" | "orders" | "watchlist" | "charts">("overview");
   const [ticks, setTicks] = useState<Tick[]>([]);
   const [orders, setOrders] = useState<OrderRec[]>([]);
@@ -58,31 +62,36 @@ export default function TradingDashboard() {
 
   // WebSocket connection for live data (safe on Vercel without env)
   useEffect(() => {
-    const base = (process.env.NEXT_PUBLIC_BACKEND_URL || (typeof window !== "undefined" ? window.location.origin : ""));
-    if (!base) return;
-    let ws: WebSocket | null = null;
     try {
-      ws = new WebSocket(base.replace(/^http/, "ws") + "/ws/ticks");
+      const base = (process.env.NEXT_PUBLIC_BACKEND_URL || (typeof window !== "undefined" ? window.location.origin : ""));
+      if (!base) { setWsConnected(false); return; }
+      let ws: WebSocket | null = null;
+      try {
+        const wsUrl = base.replace(/^http/, "ws") + "/ws/ticks";
+        ws = new WebSocket(wsUrl);
+      } catch {
+        setWsConnected(false);
+        return;
+      }
+      wsRef.current = ws;
+      ws.onmessage = (evt) => {
+        try {
+          const data = JSON.parse(evt.data);
+          if (Array.isArray(data.ticks)) {
+            const ts = Date.now();
+            setTicks(data.ticks.map((t: any) => ({ ...t, updated_at: ts })));
+          }
+        } catch {}
+      };
+      ws.onopen = () => setWsConnected(true);
+      ws.onclose = () => {
+        wsRef.current = null;
+        setWsConnected(false);
+      };
+      return () => { try { ws?.close(); } catch {} };
     } catch {
       setWsConnected(false);
-      return;
     }
-    wsRef.current = ws;
-    ws.onmessage = (evt) => {
-      try {
-        const data = JSON.parse(evt.data);
-        if (Array.isArray(data.ticks)) {
-          const ts = Date.now();
-          setTicks(data.ticks.map((t: any) => ({ ...t, updated_at: ts })));
-        }
-      } catch {}
-    };
-    ws.onopen = () => setWsConnected(true);
-    ws.onclose = () => {
-      wsRef.current = null;
-      setWsConnected(false);
-    };
-    return () => { try { ws?.close(); } catch {} };
   }, []);
 
   // Load initial data
@@ -189,8 +198,12 @@ export default function TradingDashboard() {
   };
 
   const getCurrentPrice = (symbol: string): number => {
-    const tick = ticks.find(t => t.symbol === symbol);
-    return tick ? (tick.last_price ?? tick.last_traded_price ?? tick.ltp ?? 0) : 0;
+    try {
+      const tick = ticks.find(t => t.symbol === symbol);
+      return tick ? (tick.last_price ?? tick.last_traded_price ?? tick.ltp ?? 0) : 0;
+    } catch {
+      return 0;
+    }
   };
 
   const formatCurrency = (value: number): string => {
@@ -734,7 +747,14 @@ export default function TradingDashboard() {
               </button>
             </div>
             <div style={{ height: "400px", border: "1px solid #ddd", borderRadius: "4px" }}>
-              <CandleChart symbol={selectedSymbol} exchange="NSE" />
+              {/* Safeguard render in case CandleChart fails */}
+              {(() => {
+                try {
+                  return <CandleChart symbol={selectedSymbol} exchange="NSE" heikinAshi={true} />;
+                } catch {
+                  return <div style={{ padding: 12, color: "#666" }}>Chart unavailable</div>;
+                }
+              })()}
             </div>
           </div>
         )}

@@ -730,7 +730,32 @@ export default function Home() {
           <select value={schedStrategy} onChange={(e) => setSchedStrategy(e.target.value)}>
             <option value="sma">SMA</option>
             <option value="ema">EMA</option>
+            <option value="rsi">RSI</option>
+            <option value="bollinger">Bollinger</option>
+            <option value="macd">MACD</option>
+            <option value="support_resistance">Support/Resistance</option>
+            <option value="options_straddle">Options Straddle</option>
+            <option value="options_strangle">Options Strangle</option>
+            <option value="options_touch_sma">Options Touch 21-SMA</option>
+            <option value="all">All (equity strategies)</option>
           </select>
+          {schedStrategy === "sma" && (
+            <label style={{ display: "flex", alignItems: "center", gap: 6 }}>
+              <input id="entry_on_touch" type="checkbox" /> Use 21-SMA Touch Entries
+            </label>
+          )}
+          {schedStrategy === "options_touch_sma" && (
+            <>
+              <div>
+                <label>OTM Offset</label>
+                <input id="opt_touch_offset" type="number" defaultValue={0} style={{ width: "100%", padding: 6 }} />
+              </div>
+              <div>
+                <label>Qty per leg</label>
+                <input id="opt_touch_qty" type="number" defaultValue={1} style={{ width: "100%", padding: 6 }} />
+              </div>
+            </>
+          )}
           <input value={schedShort} onChange={(e) => setSchedShort(Number(e.target.value || 20))} placeholder="Short" />
           <input value={schedLong} onChange={(e) => setSchedLong(Number(e.target.value || 50))} placeholder="Long" />
           <label style={{ display: "flex", alignItems: "center", gap: 6 }}>
@@ -741,6 +766,9 @@ export default function Home() {
           <input value={schedStop} onChange={(e) => setSchedStop(e.target.value)} placeholder="Stop HH:MM" />
           <label style={{ display: "flex", alignItems: "center", gap: 6 }}>
             <input type="checkbox" checked={schedSquare} onChange={(e) => setSchedSquare(e.target.checked)} /> Square-off EOD
+          </label>
+          <label style={{ display: "flex", alignItems: "center", gap: 6 }}>
+            <input id="skip_weekends" type="checkbox" defaultChecked={true} /> Skip Weekends
           </label>
           <input
             value={schedSymbols}
@@ -767,6 +795,10 @@ export default function Home() {
                   start: schedStart,
                   stop: schedStop,
                   square_off_eod: schedSquare,
+                  skip_weekends: (document.getElementById('skip_weekends') as HTMLInputElement)?.checked ?? true,
+                  entry_on_touch: (document.getElementById('entry_on_touch') as HTMLInputElement)?.checked ?? false,
+                  options_touch_offset: Number((document.getElementById('opt_touch_offset') as HTMLInputElement)?.value || 0),
+                  options_touch_quantity: Number((document.getElementById('opt_touch_qty') as HTMLInputElement)?.value || 1),
                 }),
               });
               pushToast("Schedule saved", "success");
@@ -781,8 +813,30 @@ export default function Home() {
               if (!list.length) { pushToast("No symbols", "error"); return; }
               if (schedStrategy === "ema") {
                 await fetch(backendUrl + "/strategy/ema/start", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ symbols: list, exchange, short: schedShort, long: schedLong, live: schedLive }) });
-              } else {
+              } else if (schedStrategy === "rsi") {
+                await fetch(backendUrl + "/strategy/rsi/start", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ symbols: list, exchange, period: 14, oversold: 30, overbought: 70, live: schedLive }) });
+              } else if (schedStrategy === "bollinger") {
+                await fetch(backendUrl + "/strategy/bollinger/start", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ symbols: list, exchange, period: 20, std_dev: 2.0, live: schedLive }) });
+              } else if (schedStrategy === "macd") {
+                await fetch(backendUrl + "/strategy/macd/start", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ symbols: list, exchange, fast_period: 12, slow_period: 26, signal_period: 9, live: schedLive }) });
+              } else if (schedStrategy === "support_resistance") {
+                await fetch(backendUrl + "/strategy/support_resistance/start", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ symbols: list, exchange, lookback_period: 50, breakout_threshold: 0.01, live: schedLive }) });
+              } else if (schedStrategy === "options_straddle") {
+                await fetch(backendUrl + "/strategy/options_straddle/start", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ symbols: list, underlying: list[0] || 'NIFTY', expiry: 'next', quantity: 1, volatility_threshold: 0.02, live: schedLive }) });
+              } else if (schedStrategy === "options_strangle") {
+                await fetch(backendUrl + "/strategy/options_strangle/start", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ symbols: list, underlying: list[0] || 'NIFTY', expiry: 'next', quantity: 1, volatility_threshold: 0.02, otm_offset: 2, live: schedLive }) });
+              } else if (schedStrategy === "options_touch_sma") {
+                const off = Number((document.getElementById('opt_touch_offset') as HTMLInputElement)?.value || 0);
+                const qtyo = Number((document.getElementById('opt_touch_qty') as HTMLInputElement)?.value || 1);
+                await fetch(backendUrl + "/strategy/options_touch_sma/start", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ symbols: list, exchange, length: 21, offset: off, quantity: qtyo, live: schedLive }) });
+              } else if (schedStrategy === "all") {
+                // fire a set of core equity strategies
                 await fetch(backendUrl + "/strategy/sma/start", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ symbols: list, exchange, short: schedShort, long: schedLong, live: schedLive }) });
+                await fetch(backendUrl + "/strategy/ema/start", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ symbols: list, exchange, short: 12, long: 26, live: schedLive }) });
+                await fetch(backendUrl + "/strategy/rsi/start", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ symbols: list, exchange, period: 14, oversold: 30, overbought: 70, live: schedLive }) });
+              } else {
+                const touch = (document.getElementById('entry_on_touch') as HTMLInputElement)?.checked ?? false;
+                await fetch(backendUrl + "/strategy/sma/start", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ symbols: list, exchange, short: schedShort, long: schedLong, live: schedLive, entry_on_touch: touch }) });
               }
               pushToast("Strategy started", "success");
             }}

@@ -10,6 +10,9 @@ export default function Risk() {
   const [tp, setTp] = useState<number>(0);
   const [auto, setAuto] = useState<boolean>(false);
   const [trail, setTrail] = useState<number>(0);
+  const [activationPts, setActivationPts] = useState<number>(10);
+  const [trailAfterAct, setTrailAfterAct] = useState<number>(1);
+  const [exit3Candles, setExit3Candles] = useState<boolean>(true);
   const [msg, setMsg] = useState<string>("");
 
   const load = async () => {
@@ -19,6 +22,9 @@ export default function Risk() {
       setTp(Number((data.tp_pct || 0) * 100));
       setAuto(!!data.auto_close);
       setTrail(Number((data.trailing_stop_pct || 0) * 100));
+      if (typeof data.activation_points === "number") setActivationPts(Number(data.activation_points || 10));
+      if (typeof data.points_after_activation === "number") setTrailAfterAct(Number(data.points_after_activation || 1));
+      if (typeof data.exit_three_candles === "boolean") setExit3Candles(!!data.exit_three_candles);
     } catch {}
   };
 
@@ -31,7 +37,7 @@ export default function Risk() {
     await fetch(backendUrl + "/risk", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ sl_pct: sl / 100, tp_pct: tp / 100, auto_close: auto, trailing_stop_pct: trail / 100 }),
+      body: JSON.stringify({ sl_pct: sl / 100, tp_pct: tp / 100, auto_close: auto, trailing_stop_pct: trail / 100, activation_points: activationPts, points_after_activation: trailAfterAct, exit_three_candles: exit3Candles }),
     });
     setMsg("Saved.");
   };
@@ -54,6 +60,17 @@ export default function Risk() {
         <div>
           <label>Trailing Stop %</label>
           <input type="number" value={trail} onChange={(e) => setTrail(Number(e.target.value || 0))} style={{ width: "100%", padding: 8 }} />
+        </div>
+        <div>
+          <label>Activation Points (start trailing)</label>
+          <input type="number" value={activationPts} onChange={(e) => setActivationPts(Number(e.target.value || 0))} style={{ width: "100%", padding: 8 }} />
+        </div>
+        <div>
+          <label>Trailing Points After Activation</label>
+          <input type="number" value={trailAfterAct} onChange={(e) => setTrailAfterAct(Number(e.target.value || 0))} style={{ width: "100%", padding: 8 }} />
+        </div>
+        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+          <input type="checkbox" checked={exit3Candles} onChange={(e) => setExit3Candles(e.target.checked)} /> Exit on 3 adverse candles
         </div>
       </div>
       <div style={{ marginTop: 12 }}>

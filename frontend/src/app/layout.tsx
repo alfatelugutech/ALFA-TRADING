@@ -35,6 +35,7 @@ export default function RootLayout({ children }: { children: any }) {
                     <a href="/options-trading">Options Trading</a>
                     <a href="/options-strategies">Options Strategies</a>
                     <a href="/options-builder">Strategy Builder</a>
+                    <a href="/options-touch">Options Touch 21-SMA</a>
                   </div>
                 </details>
               </div>

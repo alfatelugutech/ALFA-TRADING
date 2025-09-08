@@ -6,7 +6,7 @@ const backendUrl = process.env.NEXT_PUBLIC_BACKEND_URL || "";
 
 type Candle = { time: string; open: number; high: number; low: number; close: number; volume: number };
 
-export default function CandleChart({ symbol, exchange = "NSE" }: { symbol: string; exchange?: string }) {
+export default function CandleChart({ symbol, exchange = "NSE", heikinAshi = false }: { symbol: string; exchange?: string; heikinAshi?: boolean }) {
   const [interval, setIntervalStr] = useState<string>("5minute");
   const [candles, setCandles] = useState<Candle[]>([]);
 
@@ -15,7 +15,7 @@ export default function CandleChart({ symbol, exchange = "NSE" }: { symbol: stri
       if (!symbol) return;
       const base = backendUrl || (typeof window !== "undefined" ? window.location.origin : "");
       if (!base) return;
-      const url = new URL(`${base}/history`);
+      const url = new URL(`${base}${heikinAshi ? "/history/heikin_ashi" : "/history"}`);
       url.searchParams.set("symbol", symbol);
       url.searchParams.set("exchange", exchange);
       url.searchParams.set("interval", interval);
