@@ -192,8 +192,8 @@ paper_risk_per_trade_pct: float = float(os.getenv("PAPER_RISK_PER_TRADE_PCT", "0
 ai_active: bool = False
 ai_trade_capital: float = float(os.getenv("AI_TRADE_CAPITAL", "100000") or 100000)
 ai_risk_pct: float = float(os.getenv("AI_RISK_PCT", "0.02") or 0.02)
-ai_default_symbols: List[str] = [s.strip().upper() for s in (os.getenv("AI_DEFAULT_SYMBOLS", "RELIANCE TCS INFY HDFCBANK ICICIBANK KOTAKBANK HINDUNILVR ITC BHARTIARTL SBIN LT ASIANPAINT MARUTI AXISBANK NESTLEIND ULTRACEMCO SUNPHARMA TITAN POWERGRID NTPC") or "").split()] if os.getenv("AI_DEFAULT_SYMBOLS") else []
-ai_options_underlyings: List[str] = [s.strip().upper() for s in (os.getenv("AI_OPTIONS_UNDERLYINGS", "NIFTY BANKNIFTY SENSEX FINNIFTY") or "").split()] if os.getenv("AI_OPTIONS_UNDERLYINGS") else []
+ai_default_symbols: List[str] = [s.strip().upper() for s in (os.getenv("AI_DEFAULT_SYMBOLS", "RELIANCE TCS INFY HDFCBANK ICICIBANK KOTAKBANK HINDUNILVR ITC BHARTIARTL SBIN LT ASIANPAINT MARUTI AXISBANK NESTLEIND ULTRACEMCO SUNPHARMA TITAN POWERGRID NTPC") or "RELIANCE TCS INFY HDFCBANK ICICIBANK KOTAKBANK HINDUNILVR ITC BHARTIARTL SBIN LT ASIANPAINT MARUTI AXISBANK NESTLEIND ULTRACEMCO SUNPHARMA TITAN POWERGRID NTPC").split()]
+ai_options_underlyings: List[str] = [s.strip().upper() for s in (os.getenv("AI_OPTIONS_UNDERLYINGS", "NIFTY BANKNIFTY SENSEX FINNIFTY") or "NIFTY BANKNIFTY SENSEX FINNIFTY").split()]
 ai_options_qty: int = int(os.getenv("AI_OPTIONS_QTY", "1") or 1)
 
 # AI Trading Engine
@@ -1646,21 +1646,7 @@ def ai_config(body: AiConfigBody):
     return {"active": ai_active, "trade_capital": ai_trade_capital, "risk_pct": ai_risk_pct}
 
 
-class AiStartBody(BaseModel):
-    strategy: Optional[str] = "sma"  # sma|ema
-    exchange: Optional[str] = "NSE"
-    short: Optional[int] = 20
-    long: Optional[int] = 50
-    live: Optional[bool] = False
-
-
-@app.post("/ai/start")
-def ai_start(body: AiStartBody):
-    # Use default AI symbols if none were scheduled
-    req = SmaStartRequest(symbols=ai_default_symbols, exchange=body.exchange or "NSE", short=body.short or 20, long=body.long or 50, live=bool(body.live))
-    if (body.strategy or "sma").lower() == "ema":
-        return strategy_ema_start(EmaStartRequest(symbols=ai_default_symbols, exchange=req.exchange, short=req.short, long=req.long, live=req.live))
-    return strategy_sma_start(req)
+# Removed duplicate AI start endpoint - using the comprehensive one below
 
 
 class OptionsAtmTradeBody(BaseModel):
@@ -1793,23 +1779,34 @@ def ai_stop_trading():
 def ai_status():
     """Get AI trading status"""
     try:
-        if not ai_active or not ai_engine:
-            return {
-                "active": False,
-                "capital": ai_trade_capital,
-                "risk_pct": ai_risk_pct,
-                "symbols": ai_default_symbols
-            }
-        
-        status = ai_engine.get_ai_status()
-        status.update({
+        # Always return a complete status object
+        status_data = {
             "active": ai_active,
             "capital": ai_trade_capital,
             "risk_pct": ai_risk_pct,
-            "symbols": ai_default_symbols
-        })
+            "symbols": ai_default_symbols,
+            "options_underlyings": ai_options_underlyings,
+            "options_qty": ai_options_qty,
+            "active_strategies": [],
+            "total_trades": 0,
+            "successful_trades": 0,
+            "total_profit": 0,
+            "success_rate": 0,
+            "available_capital": ai_trade_capital,
+            "last_analysis": None,
+            "strategy_performance": {}
+        }
         
-        return status
+        # If AI engine is active, get additional status from it
+        if ai_active and ai_engine:
+            try:
+                engine_status = ai_engine.get_ai_status()
+                status_data.update(engine_status)
+            except Exception as e:
+                logger.warning("Failed to get engine status: %s", e)
+        
+        logger.info("AI status requested. Returning: active=%s, capital=%s", ai_active, ai_trade_capital)
+        return status_data
         
     except Exception as e:
         logger.exception("Failed to get AI status: %s", e)
