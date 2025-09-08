@@ -1,7 +1,7 @@
 "use client";
-export const dynamic = "force-dynamic";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
+import OrderManager from "../components/OrderManager";
 
 type OrderRec = {
   ts: number;
@@ -12,431 +12,374 @@ type OrderRec = {
   price: number;
   dry_run: boolean;
   source: string;
+  status?: string;
+  order_id?: string;
 };
 
 const backendUrl = process.env.NEXT_PUBLIC_BACKEND_URL || "http://localhost:10000";
 
 export default function OrdersPage() {
   const [orders, setOrders] = useState<OrderRec[]>([]);
-  const [loading, setLoading] = useState<boolean>(false);
-  const [auto, setAuto] = useState<boolean>(true);
-  const [intervalMs, setIntervalMs] = useState<number>(5000);
-  const [side, setSide] = useState<string>("ALL");
-  const [query, setQuery] = useState<string>("");
-  const [demat, setDemat] = useState<any[]>([]);
-  const [resetCash, setResetCash] = useState<string>("");
-  const [strategyStats, setStrategyStats] = useState<any>({});
-  const [pnl, setPnl] = useState<{ 
-    realized: number; 
-    unrealized: number; 
-    total: number;
-    paper: { realized: number; unrealized: number; total: number };
-    live: { realized: number; unrealized: number; total: number };
-  } | null>(null);
-  const [positions, setPositions] = useState<any[]>([]);
+  const [activeTab, setActiveTab] = useState<"place" | "history" | "pending">("place");
+  const [toasts, setToasts] = useState<{ id: number; text: string; kind: "info" | "success" | "error" }[]>([]);
 
-  const load = async () => {
-    setLoading(true);
+  const pushToast = (text: string, kind: "info" | "success" | "error" = "info") => {
+    const id = Date.now() + Math.floor(Math.random() * 1000);
+    setToasts((t) => [...t, { id, text, kind }]);
+    setTimeout(() => setToasts((t) => t.filter((x) => x.id !== id)), 3500);
+  };
+
+  const loadOrders = async () => {
     try {
-      const data = await (await fetch(backendUrl + "/orders"))?.json();
-      setOrders(Array.isArray(data) ? data : []);
-    } catch {
-      // ignore
+      const data = await (await fetch(backendUrl + "/orders")).json();
+      setOrders(data || []);
+    } catch (error) {
+      pushToast("Failed to load orders", "error");
     }
-    
-    // Load PnL data
-    try {
-      const pnlData = await (await fetch(backendUrl + "/pnl"))?.json();
-      setPnl(pnlData);
-    } catch {
-      setPnl(null);
-    }
-    
-    // Load positions data
-    try {
-      const posData = await (await fetch(backendUrl + "/positions"))?.json();
-      setPositions(posData.positions || []);
-    } catch {
-      setPositions([]);
-    }
-    
-    setLoading(false);
   };
 
   useEffect(() => {
-    load();
+    loadOrders();
   }, []);
 
-  useEffect(() => {
-    if (!auto) return;
-    const id = setInterval(load, intervalMs);
-    return () => clearInterval(id);
-  }, [auto, intervalMs]);
+  const formatCurrency = (value: number): string => {
+    return new Intl.NumberFormat('en-IN', {
+      style: 'currency',
+      currency: 'INR',
+      minimumFractionDigits: 2,
+      maximumFractionDigits: 2
+    }).format(value);
+  };
 
-  const filtered = useMemo(() => {
-    return orders
-      .filter((o) => (side === "ALL" ? true : o.side === side))
-      .filter((o) => (query ? o.symbol.toUpperCase().includes(query.toUpperCase()) : true))
-      .slice(-500)
-      .reverse();
-  }, [orders, side, query]);
+  const formatNumber = (value: number, decimals: number = 2): string => {
+    return new Intl.NumberFormat('en-IN', {
+      minimumFractionDigits: decimals,
+      maximumFractionDigits: decimals
+    }).format(value);
+  };
 
-  const getLotInfo = (symbol: string, qty: number) => {
-    const u = (symbol || "").toUpperCase();
-    if (!(u.includes("CE") || u.includes("PE"))) return "";
-    let lot = 75;
-    if (u.includes("BANKNIFTY")) lot = 35;
-    else if (u.includes("SENSEX")) lot = 20;
-    else if (u.includes("FINNIFTY")) lot = 40;
-    if (qty % lot === 0) {
-      const lots = Math.round(qty / lot);
-      return ` (${lots} lot${lots>1?"s":""} × ${lot})`;
+  const cancelOrder = async (orderId: string) => {
+    try {
+      await fetch(`${backendUrl}/orders/cancel`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ order_id: orderId })
+      });
+      pushToast(`Order ${orderId} cancelled`, "success");
+      loadOrders();
+    } catch (error) {
+      pushToast("Failed to cancel order", "error");
     }
-    return ` (contracts)`;
   };
 
-  const exportCsv = () => {
-    if (!filtered.length) return;
-    const header = ["time","side","symbol","qty","price","mode","source"];
-    const rows = filtered.map((o)=>[
-      new Date(o.ts).toISOString(),
-      o.side,
-      o.symbol,
-      String(o.quantity),
-      o.price.toFixed(2),
-      o.dry_run ? "PAPER" : "LIVE",
-      o.source,
-    ]);
-    const csv = [header, ...rows].map(r=>r.map(x=>`"${String(x).replace(/"/g,'""')}"`).join(",")).join("\n");
-    const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = `orders_${Date.now()}.csv`;
-    a.click();
-    URL.revokeObjectURL(url);
-  };
-
-  const exportPdf = () => {
-    const w = window.open("", "_blank");
-    if (!w) return;
-    const rows = filtered
-      .map(
-        (o) =>
-          `<tr><td>${new Date(o.ts).toLocaleString()}</td><td>${o.side}</td><td>${o.symbol}</td><td style="text-align:right">${o.quantity}</td><td style="text-align:right">${o.price.toFixed(2)}</td><td style="text-align:center">${o.dry_run ? "PAPER" : "LIVE"}</td><td>${o.source}</td></tr>`
-      )
-      .join("");
-    w.document.write(
-      `<html><head><title>Orders</title></head><body><h3>Orders</h3><table border="1" cellspacing="0" cellpadding="4" style="border-collapse:collapse;width:100%"><thead><tr><th>Time</th><th>Side</th><th>Symbol</th><th>Qty</th><th>Price</th><th>Mode</th><th>Source</th></tr></thead><tbody>${rows}</tbody></table><script>window.print();</script></body></html>`
-    );
-    w.document.close();
-  };
-
-  const loadDemat = async () => {
+  const modifyOrder = async (orderId: string, newPrice: number, newQuantity: number) => {
     try {
-      const d = await (await fetch(backendUrl + "/broker/orders")).json();
-      setDemat(Array.isArray(d) ? d : []);
-    } catch { setDemat([]); }
-  };
-
-  const resetPaper = async () => {
-    await fetch(backendUrl + "/paper/reset", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ cash: resetCash ? Number(resetCash) : undefined, clear_orders: true }),
-    });
-    setResetCash("");
-    load();
-  };
-
-  const loadStrategyStats = async () => {
-    try {
-      const s = await (await fetch(backendUrl + "/reports/strategy")).json();
-      setStrategyStats(s || {});
-    } catch { setStrategyStats({}); }
+      await fetch(`${backendUrl}/orders/modify`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ 
+          order_id: orderId, 
+          price: newPrice, 
+          quantity: newQuantity 
+        })
+      });
+      pushToast(`Order ${orderId} modified`, "success");
+      loadOrders();
+    } catch (error) {
+      pushToast("Failed to modify order", "error");
+    }
   };
 
   return (
-    <main style={{ maxWidth: 1000, margin: "20px auto", fontFamily: "sans-serif" }}>
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-        <h2>Orders</h2>
-        <a href="/" style={{ color: "#0969da", textDecoration: "none" }}>Home</a>
+    <div style={{ 
+      display: "grid", 
+      gridTemplateColumns: "400px 1fr", 
+      gap: "20px", 
+      padding: "20px",
+      minHeight: "100vh",
+      backgroundColor: "#f8f9fa"
+    }}>
+      {/* Order Placement Panel */}
+      <div>
+        <OrderManager />
       </div>
 
-      {/* Profit/Loss Summary */}
-      {pnl && (
-        <div style={{ marginBottom: 16 }}>
-          {/* Main P&L Summary */}
-          <div style={{ 
-            display: "grid", 
-            gridTemplateColumns: "repeat(4, 1fr)", 
-            gap: 16, 
-            marginBottom: 12,
-            padding: 16,
-            backgroundColor: "#f8f9fa",
-            borderRadius: 8,
-            border: "1px solid #e9ecef"
-          }}>
-            <div style={{ textAlign: "center" }}>
-              <div style={{ fontSize: "0.9em", color: "#6c757d", marginBottom: 4 }}>Realized P&L</div>
-              <div style={{ 
-                fontSize: "1.5em", 
-                fontWeight: "bold",
-                color: pnl.realized >= 0 ? "#28a745" : "#dc3545"
-              }}>
-                ₹{pnl.realized.toLocaleString()}
-              </div>
-            </div>
-            <div style={{ textAlign: "center" }}>
-              <div style={{ fontSize: "0.9em", color: "#6c757d", marginBottom: 4 }}>Unrealized P&L</div>
-              <div style={{ 
-                fontSize: "1.5em", 
-                fontWeight: "bold",
-                color: pnl.unrealized >= 0 ? "#28a745" : "#dc3545"
-              }}>
-                ₹{pnl.unrealized.toLocaleString()}
-              </div>
-            </div>
-            <div style={{ textAlign: "center" }}>
-              <div style={{ fontSize: "0.9em", color: "#6c757d", marginBottom: 4 }}>Total P&L</div>
-              <div style={{ 
-                fontSize: "1.5em", 
-                fontWeight: "bold",
-                color: pnl.total >= 0 ? "#28a745" : "#dc3545"
-              }}>
-                ₹{pnl.total.toLocaleString()}
-              </div>
-            </div>
-            <div style={{ textAlign: "center" }}>
-              <div style={{ fontSize: "0.9em", color: "#6c757d", marginBottom: 4 }}>Total Trades</div>
-              <div style={{ fontSize: "1.5em", fontWeight: "bold", color: "#007bff" }}>
-                {orders.length}
-              </div>
-            </div>
-          </div>
-          
-          {/* Paper vs Live Trading Breakdown */}
-          <div style={{ 
-            display: "grid", 
-            gridTemplateColumns: "1fr 1fr", 
-            gap: 12,
-            padding: 12,
-            backgroundColor: "#ffffff",
-            borderRadius: 8,
-            border: "1px solid #e9ecef"
-          }}>
-            <div>
-              <h4 style={{ margin: "0 0 8px 0", color: "#6c757d" }}>📄 Paper Trading</h4>
-              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 8, fontSize: "0.9em" }}>
-                <div>
-                  <div style={{ color: "#6c757d" }}>Realized</div>
-                  <div style={{ 
-                    fontWeight: "bold",
-                    color: pnl.paper.realized >= 0 ? "#28a745" : "#dc3545"
-                  }}>
-                    ₹{pnl.paper.realized.toLocaleString()}
-                  </div>
-                </div>
-                <div>
-                  <div style={{ color: "#6c757d" }}>Unrealized</div>
-                  <div style={{ 
-                    fontWeight: "bold",
-                    color: pnl.paper.unrealized >= 0 ? "#28a745" : "#dc3545"
-                  }}>
-                    ₹{pnl.paper.unrealized.toLocaleString()}
-                  </div>
-                </div>
-                <div>
-                  <div style={{ color: "#6c757d" }}>Total</div>
-                  <div style={{ 
-                    fontWeight: "bold",
-                    color: pnl.paper.total >= 0 ? "#28a745" : "#dc3545"
-                  }}>
-                    ₹{pnl.paper.total.toLocaleString()}
-                  </div>
-                </div>
-              </div>
-            </div>
-            
-            <div>
-              <h4 style={{ margin: "0 0 8px 0", color: "#6c757d" }}>💰 Live Trading</h4>
-              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 8, fontSize: "0.9em" }}>
-                <div>
-                  <div style={{ color: "#6c757d" }}>Realized</div>
-                  <div style={{ 
-                    fontWeight: "bold",
-                    color: pnl.live.realized >= 0 ? "#28a745" : "#dc3545"
-                  }}>
-                    ₹{pnl.live.realized.toLocaleString()}
-                  </div>
-                </div>
-                <div>
-                  <div style={{ color: "#6c757d" }}>Unrealized</div>
-                  <div style={{ 
-                    fontWeight: "bold",
-                    color: pnl.live.unrealized >= 0 ? "#28a745" : "#dc3545"
-                  }}>
-                    ₹{pnl.live.unrealized.toLocaleString()}
-                  </div>
-                </div>
-                <div>
-                  <div style={{ color: "#6c757d" }}>Total</div>
-                  <div style={{ 
-                    fontWeight: "bold",
-                    color: pnl.live.total >= 0 ? "#28a745" : "#dc3545"
-                  }}>
-                    ₹{pnl.live.total.toLocaleString()}
-                  </div>
-                </div>
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
-
-      <div style={{ display: "flex", gap: 12, alignItems: "center", marginBottom: 12 }}>
-        <button onClick={load} style={{ padding: "6px 10px" }}>{loading ? "Loading..." : "Refresh"}</button>
-        <label>
-          <input type="checkbox" checked={auto} onChange={(e) => setAuto(e.target.checked)} style={{ marginRight: 6 }} />
-          Auto refresh
-        </label>
-        <input
-          type="number"
-          value={intervalMs}
-          onChange={(e) => setIntervalMs(Number(e.target.value || 5000))}
-          style={{ width: 100, padding: 6 }}
-        />
-        <select value={side} onChange={(e) => setSide(e.target.value)}>
-          <option value="ALL">ALL</option>
-          <option value="BUY">BUY</option>
-          <option value="SELL">SELL</option>
-        </select>
-        <input
-          placeholder="Search symbol"
-          value={query}
-          onChange={(e) => setQuery(e.target.value)}
-          style={{ flex: 1, padding: 6 }}
-        />
-        <button onClick={exportCsv} style={{ padding: "6px 10px" }}>Export CSV</button>
-        <button onClick={exportPdf} style={{ padding: "6px 10px" }}>Export PDF</button>
-        <input placeholder="Reset cash" value={resetCash} onChange={(e)=>setResetCash(e.target.value)} style={{ width: 120, padding: 6 }} />
-        <button onClick={resetPaper} style={{ padding: "6px 10px" }}>Reset Paper</button>
-        <button onClick={loadDemat} style={{ padding: "6px 10px" }}>Load Demat Orders</button>
-        <button onClick={loadStrategyStats} style={{ padding: "6px 10px" }}>Strategy Report</button>
-      </div>
-
-      <table style={{ width: "100%", borderCollapse: "collapse" }}>
-        <thead>
-          <tr>
-            <th style={{ textAlign: "left" }}>Time</th>
-            <th style={{ textAlign: "left" }}>Side</th>
-            <th style={{ textAlign: "left" }}>Symbol</th>
-            <th style={{ textAlign: "right" }}>Qty</th>
-            <th style={{ textAlign: "right" }}>Price</th>
-            <th style={{ textAlign: "center" }}>Mode</th>
-            <th style={{ textAlign: "left" }}>Source</th>
-          </tr>
-        </thead>
-        <tbody>
-          {filtered.map((o) => (
-            <tr key={`${o.ts}-${o.symbol}-${o.side}-${o.price}`}>
-              <td>{new Date(o.ts).toLocaleString()}</td>
-              <td style={{ color: o.side === "BUY" ? "#0a0" : "#a00" }}>{o.side}</td>
-              <td>{o.symbol}</td>
-              <td style={{ textAlign: "right" }}>{o.quantity}{getLotInfo(o.symbol, o.quantity)}</td>
-              <td style={{ textAlign: "right" }}>{o.price.toFixed(2)}</td>
-              <td style={{ textAlign: "center" }}>{o.dry_run ? "PAPER" : "LIVE"}</td>
-              <td>{o.source}</td>
-            </tr>
+      {/* Orders Management Panel */}
+      <div style={{ 
+        backgroundColor: "white", 
+        borderRadius: "8px", 
+        boxShadow: "0 2px 4px rgba(0,0,0,0.1)",
+        overflow: "hidden"
+      }}>
+        {/* Tab Navigation */}
+        <div style={{ 
+          display: "flex", 
+          borderBottom: "1px solid #eee"
+        }}>
+          {[
+            { key: "place", label: "Place Order" },
+            { key: "pending", label: "Pending Orders" },
+            { key: "history", label: "Order History" }
+          ].map(tab => (
+            <button
+              key={tab.key}
+              onClick={() => setActiveTab(tab.key as any)}
+              style={{
+                flex: 1,
+                padding: "12px 16px",
+                backgroundColor: activeTab === tab.key ? "#007bff" : "transparent",
+                color: activeTab === tab.key ? "white" : "#333",
+                border: "none",
+                cursor: "pointer",
+                fontWeight: activeTab === tab.key ? "bold" : "normal",
+                fontSize: "14px"
+              }}
+            >
+              {tab.label}
+            </button>
           ))}
-        </tbody>
-      </table>
-      <div style={{ marginTop: 8, fontSize: 12 }}>Showing {filtered.length} of {orders.length} orders</div>
-
-      {/* Current Positions */}
-      {positions.length > 0 && (
-        <div style={{ marginTop: 24 }}>
-          <h3>Current Positions</h3>
-          <table style={{ width: "100%", borderCollapse: "collapse" }}>
-            <thead>
-              <tr>
-                <th style={{ textAlign: "left" }}>Symbol</th>
-                <th style={{ textAlign: "left" }}>Exchange</th>
-                <th style={{ textAlign: "right" }}>Quantity</th>
-                <th style={{ textAlign: "right" }}>Avg Price</th>
-                <th style={{ textAlign: "right" }}>LTP</th>
-                <th style={{ textAlign: "right" }}>Unrealized P&L</th>
-              </tr>
-            </thead>
-            <tbody>
-              {positions.map((pos, index) => (
-                <tr key={index}>
-                  <td>{pos.symbol}</td>
-                  <td>{pos.exchange}</td>
-                  <td style={{ textAlign: "right" }}>{pos.quantity}</td>
-                  <td style={{ textAlign: "right" }}>₹{pos.avg_price.toFixed(2)}</td>
-                  <td style={{ textAlign: "right" }}>₹{pos.ltp.toFixed(2)}</td>
-                  <td style={{ 
-                    textAlign: "right", 
-                    color: pos.unrealized >= 0 ? "#28a745" : "#dc3545",
-                    fontWeight: "bold"
-                  }}>
-                    ₹{pos.unrealized.toFixed(2)}
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
         </div>
-      )}
 
-      {demat.length > 0 && (
-        <div style={{ marginTop: 24 }}>
-          <h3>Demat Orders</h3>
-          <table style={{ width: "100%", borderCollapse: "collapse" }}>
-            <thead>
-              <tr>
-                <th style={{ textAlign: "left" }}>Order ID</th>
-                <th style={{ textAlign: "left" }}>Symbol</th>
-                <th style={{ textAlign: "left" }}>Side</th>
-                <th style={{ textAlign: "right" }}>Qty</th>
-                <th style={{ textAlign: "right" }}>Price</th>
-                <th style={{ textAlign: "left" }}>Status</th>
-                <th style={{ textAlign: "left" }}>Time</th>
-              </tr>
-            </thead>
-            <tbody>
-              {demat.slice(0, 200).map((o: any) => (
-                <tr key={o.order_id}>
-                  <td>{o.order_id}</td>
-                  <td>{o.tradingsymbol}</td>
-                  <td>{o.transaction_type}</td>
-                  <td style={{ textAlign: "right" }}>{o.quantity}</td>
-                  <td style={{ textAlign: "right" }}>{Number(o.price || o.average_price || 0).toFixed(2)}</td>
-                  <td>{o.status}</td>
-                  <td>{o.order_timestamp || o.exchange_timestamp}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      )}
+        {/* Tab Content */}
+        <div style={{ padding: "20px" }}>
+          {activeTab === "place" && (
+            <div style={{ textAlign: "center", padding: "40px", color: "#666" }}>
+              <h3>Place Orders</h3>
+              <p>Use the order form on the left to place new orders.</p>
+              <div style={{ 
+                display: "grid", 
+                gridTemplateColumns: "repeat(3, 1fr)", 
+                gap: "16px", 
+                marginTop: "20px" 
+              }}>
+                <div style={{ padding: "16px", backgroundColor: "#f8f9fa", borderRadius: "8px" }}>
+                  <h4 style={{ margin: "0 0 8px 0", color: "#007bff" }}>Market Orders</h4>
+                  <p style={{ margin: 0, fontSize: "14px" }}>Execute immediately at current market price</p>
+                </div>
+                <div style={{ padding: "16px", backgroundColor: "#f8f9fa", borderRadius: "8px" }}>
+                  <h4 style={{ margin: "0 0 8px 0", color: "#28a745" }}>Limit Orders</h4>
+                  <p style={{ margin: 0, fontSize: "14px" }}>Set your desired price for execution</p>
+                </div>
+                <div style={{ padding: "16px", backgroundColor: "#f8f9fa", borderRadius: "8px" }}>
+                  <h4 style={{ margin: "0 0 8px 0", color: "#dc3545" }}>Stop Loss</h4>
+                  <p style={{ margin: 0, fontSize: "14px" }}>Protect your positions with stop loss orders</p>
+                </div>
+              </div>
+            </div>
+          )}
 
-      {Object.keys(strategyStats).length > 0 && (
-        <div style={{ marginTop: 24 }}>
-          <h3>Strategy Profit Report</h3>
-          <table style={{ width: "100%", borderCollapse: "collapse" }}>
-            <thead><tr><th>Strategy</th><th style={{ textAlign: "right" }}>Trades</th><th style={{ textAlign: "right" }}>Buy Amt</th><th style={{ textAlign: "right" }}>Sell Amt</th><th style={{ textAlign: "right" }}>Profit</th></tr></thead>
-            <tbody>
-              {Object.entries(strategyStats).map(([name, v]: any) => (
-                <tr key={name}><td>{name}</td><td style={{ textAlign: "right" }}>{v.trades}</td><td style={{ textAlign: "right" }}>{Number(v.buy).toFixed(2)}</td><td style={{ textAlign: "right" }}>{Number(v.sell).toFixed(2)}</td><td style={{ textAlign: "right", color: Number(v.profit) >= 0 ? "#0a0" : "#a00" }}>{Number(v.profit).toFixed(2)}</td></tr>
-              ))}
-            </tbody>
-          </table>
+          {activeTab === "pending" && (
+            <div>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "16px" }}>
+                <h3>Pending Orders</h3>
+                <button 
+                  onClick={loadOrders}
+                  style={{
+                    padding: "6px 12px",
+                    backgroundColor: "#007bff",
+                    color: "white",
+                    border: "none",
+                    borderRadius: "4px",
+                    cursor: "pointer"
+                  }}
+                >
+                  Refresh
+                </button>
+              </div>
+              <div style={{ overflowX: "auto" }}>
+                <table style={{ width: "100%", borderCollapse: "collapse" }}>
+                  <thead>
+                    <tr style={{ backgroundColor: "#f8f9fa" }}>
+                      <th style={{ padding: "8px", textAlign: "left", borderBottom: "1px solid #ddd" }}>Time</th>
+                      <th style={{ padding: "8px", textAlign: "left", borderBottom: "1px solid #ddd" }}>Symbol</th>
+                      <th style={{ padding: "8px", textAlign: "left", borderBottom: "1px solid #ddd" }}>Side</th>
+                      <th style={{ padding: "8px", textAlign: "right", borderBottom: "1px solid #ddd" }}>Qty</th>
+                      <th style={{ padding: "8px", textAlign: "right", borderBottom: "1px solid #ddd" }}>Price</th>
+                      <th style={{ padding: "8px", textAlign: "center", borderBottom: "1px solid #ddd" }}>Status</th>
+                      <th style={{ padding: "8px", textAlign: "center", borderBottom: "1px solid #ddd" }}>Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {orders.filter(order => order.status === "PENDING" || !order.status).map(order => (
+                      <tr key={`${order.ts}-${order.symbol}-${order.side}`}>
+                        <td style={{ padding: "8px", borderBottom: "1px solid #eee" }}>
+                          {new Date(order.ts).toLocaleTimeString()}
+                        </td>
+                        <td style={{ padding: "8px", borderBottom: "1px solid #eee" }}>{order.symbol}</td>
+                        <td style={{ 
+                          padding: "8px", 
+                          borderBottom: "1px solid #eee",
+                          color: order.side === "BUY" ? "#28a745" : "#dc3545",
+                          fontWeight: "bold"
+                        }}>
+                          {order.side}
+                        </td>
+                        <td style={{ padding: "8px", textAlign: "right", borderBottom: "1px solid #eee" }}>
+                          {order.quantity}
+                        </td>
+                        <td style={{ padding: "8px", textAlign: "right", borderBottom: "1px solid #eee" }}>
+                          {formatCurrency(order.price)}
+                        </td>
+                        <td style={{ padding: "8px", textAlign: "center", borderBottom: "1px solid #eee" }}>
+                          <span style={{ 
+                            padding: "2px 8px", 
+                            borderRadius: "12px", 
+                            fontSize: "12px",
+                            backgroundColor: "#fff3cd",
+                            color: "#856404"
+                          }}>
+                            {order.status || "PENDING"}
+                          </span>
+                        </td>
+                        <td style={{ padding: "8px", textAlign: "center", borderBottom: "1px solid #eee" }}>
+                          <div style={{ display: "flex", gap: "4px", justifyContent: "center" }}>
+                            <button
+                              onClick={() => {
+                                const newPrice = prompt("New price:", order.price.toString());
+                                const newQty = prompt("New quantity:", order.quantity.toString());
+                                if (newPrice && newQty) {
+                                  modifyOrder(order.order_id || "", parseFloat(newPrice), parseInt(newQty));
+                                }
+                              }}
+                              style={{
+                                padding: "2px 6px",
+                                backgroundColor: "#ffc107",
+                                color: "white",
+                                border: "none",
+                                borderRadius: "4px",
+                                cursor: "pointer",
+                                fontSize: "12px"
+                              }}
+                            >
+                              Modify
+                            </button>
+                            <button
+                              onClick={() => cancelOrder(order.order_id || "")}
+                              style={{
+                                padding: "2px 6px",
+                                backgroundColor: "#dc3545",
+                                color: "white",
+                                border: "none",
+                                borderRadius: "4px",
+                                cursor: "pointer",
+                                fontSize: "12px"
+                              }}
+                            >
+                              Cancel
+                            </button>
+                          </div>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+                {orders.filter(order => order.status === "PENDING" || !order.status).length === 0 && (
+                  <div style={{ textAlign: "center", padding: "40px", color: "#666" }}>
+                    No pending orders
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+
+          {activeTab === "history" && (
+            <div>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "16px" }}>
+                <h3>Order History</h3>
+                <button 
+                  onClick={loadOrders}
+                  style={{
+                    padding: "6px 12px",
+                    backgroundColor: "#007bff",
+                    color: "white",
+                    border: "none",
+                    borderRadius: "4px",
+                    cursor: "pointer"
+                  }}
+                >
+                  Refresh
+                </button>
+              </div>
+              <div style={{ overflowX: "auto" }}>
+                <table style={{ width: "100%", borderCollapse: "collapse" }}>
+                  <thead>
+                    <tr style={{ backgroundColor: "#f8f9fa" }}>
+                      <th style={{ padding: "8px", textAlign: "left", borderBottom: "1px solid #ddd" }}>Time</th>
+                      <th style={{ padding: "8px", textAlign: "left", borderBottom: "1px solid #ddd" }}>Symbol</th>
+                      <th style={{ padding: "8px", textAlign: "left", borderBottom: "1px solid #ddd" }}>Side</th>
+                      <th style={{ padding: "8px", textAlign: "right", borderBottom: "1px solid #ddd" }}>Qty</th>
+                      <th style={{ padding: "8px", textAlign: "right", borderBottom: "1px solid #ddd" }}>Price</th>
+                      <th style={{ padding: "8px", textAlign: "center", borderBottom: "1px solid #ddd" }}>Mode</th>
+                      <th style={{ padding: "8px", textAlign: "left", borderBottom: "1px solid #ddd" }}>Source</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {orders.slice(-100).reverse().map(order => (
+                      <tr key={`${order.ts}-${order.symbol}-${order.side}`}>
+                        <td style={{ padding: "8px", borderBottom: "1px solid #eee" }}>
+                          {new Date(order.ts).toLocaleTimeString()}
+                        </td>
+                        <td style={{ padding: "8px", borderBottom: "1px solid #eee" }}>{order.symbol}</td>
+                        <td style={{ 
+                          padding: "8px", 
+                          borderBottom: "1px solid #eee",
+                          color: order.side === "BUY" ? "#28a745" : "#dc3545",
+                          fontWeight: "bold"
+                        }}>
+                          {order.side}
+                        </td>
+                        <td style={{ padding: "8px", textAlign: "right", borderBottom: "1px solid #eee" }}>
+                          {order.quantity}
+                        </td>
+                        <td style={{ padding: "8px", textAlign: "right", borderBottom: "1px solid #eee" }}>
+                          {formatCurrency(order.price)}
+                        </td>
+                        <td style={{ padding: "8px", textAlign: "center", borderBottom: "1px solid #eee" }}>
+                          {order.dry_run ? "PAPER" : "LIVE"}
+                        </td>
+                        <td style={{ padding: "8px", borderBottom: "1px solid #eee" }}>{order.source}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+                {orders.length === 0 && (
+                  <div style={{ textAlign: "center", padding: "40px", color: "#666" }}>
+                    No order history found
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
         </div>
-      )}
-    </main>
+      </div>
+
+      {/* Toast Notifications */}
+      <div style={{ 
+        position: "fixed", 
+        top: "16px", 
+        right: "16px", 
+        display: "flex", 
+        flexDirection: "column", 
+        gap: "8px",
+        zIndex: 1000
+      }}>
+        {toasts.map((t) => (
+          <div
+            key={t.id}
+            style={{
+              background: t.kind === "error" ? "#fee2e2" : t.kind === "success" ? "#dcfce7" : "#e5e7eb",
+              color: "#111",
+              padding: "12px 16px",
+              borderRadius: "8px",
+              boxShadow: "0 4px 12px rgba(0,0,0,0.15)",
+              minWidth: "300px",
+              border: `1px solid ${t.kind === "error" ? "#fecaca" : t.kind === "success" ? "#bbf7d0" : "#d1d5db"}`
+            }}
+          >
+            {t.text}
+          </div>
+        ))}
+      </div>
+    </div>
   );
 }
-
-

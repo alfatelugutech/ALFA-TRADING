@@ -44,12 +44,12 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
                   <summary>Trading ▾</summary>
                   <div className="card menu menu-left">
                     <a href="/trading-dashboard">🚀 Trading Dashboard</a>
+                    <a href="/orders">📋 Order Management</a>
                     <a href="/ai-trading">🤖 AI Trading</a>
-                    <a href="/advanced-features">⚡ Advanced Features</a>
-                    <a href="/strategy-builder">Strategies</a>
-                    <a href="/risk">Risk Management</a>
-                    <a href="/orders">Orders</a>
-                    <a href="/portfolio">Portfolio</a>
+                    <a href="/strategy-builder">📈 Strategy Builder</a>
+                    <a href="/risk">🛡️ Risk Management</a>
+                    <a href="/portfolio">💼 Portfolio</a>
+                    <a href="/paper-trading">📄 Paper Trading</a>
                   </div>
                 </details>
               </div>

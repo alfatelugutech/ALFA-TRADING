@@ -323,10 +323,10 @@ export default function Home() {
         </div>
       )}
       
-      {/* Quick Trading Start */}
+      {/* Professional Trading Terminal */}
       <div className="card" style={{ marginBottom: 12, backgroundColor: "#f8f9fa", border: "2px solid #007bff" }}>
-        <h3 style={{ margin: "0 0 12px 0", color: "#007bff" }}>🚀 Quick Start Trading</h3>
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 12 }}>
+        <h3 style={{ margin: "0 0 12px 0", color: "#007bff" }}>🚀 Professional Trading Terminal</h3>
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 12 }}>
           <a href="/trading-dashboard" style={{ 
             padding: "12px 16px", 
             backgroundColor: "#007bff", 
@@ -338,7 +338,7 @@ export default function Home() {
           }}>
             📊 Trading Dashboard
           </a>
-          <a href="/strategy-builder" style={{ 
+          <a href="/orders" style={{ 
             padding: "12px 16px", 
             backgroundColor: "#28a745", 
             color: "white", 
@@ -347,11 +347,22 @@ export default function Home() {
             textAlign: "center",
             fontWeight: "bold"
           }}>
-            📈 Start Strategy
+            📋 Order Management
+          </a>
+          <a href="/strategy-builder" style={{ 
+            padding: "12px 16px", 
+            backgroundColor: "#6f42c1", 
+            color: "white", 
+            textDecoration: "none", 
+            borderRadius: 6, 
+            textAlign: "center",
+            fontWeight: "bold"
+          }}>
+            📈 Strategy Builder
           </a>
           <a href="/ai-trading" style={{ 
             padding: "12px 16px", 
-            backgroundColor: "#6f42c1", 
+            backgroundColor: "#fd7e14", 
             color: "white", 
             textDecoration: "none", 
             borderRadius: 6, 
@@ -362,7 +373,7 @@ export default function Home() {
           </a>
         </div>
         <div style={{ marginTop: 8, fontSize: "0.9em", color: "#6c757d" }}>
-          💡 <strong>Tip:</strong> Use the Trading Dashboard to easily start/stop strategies and monitor your trades!
+          💡 <strong>Professional Features:</strong> Advanced order management, real-time charts, risk management, and AI-powered trading strategies!
         </div>
       </div>
       <div className="card" style={{ display: "flex", gap: 12, marginBottom: 12 }}>
