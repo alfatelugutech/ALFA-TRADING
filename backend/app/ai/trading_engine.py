@@ -40,7 +40,7 @@ class AITradingEngine:
         self.market_data: Dict[str, List[float]] = {}
         self.volume_data: Dict[str, List[float]] = {}
         self.last_analysis_time = None
-        self.analysis_interval = 30  # 30 seconds for faster trade generation
+        self.analysis_interval = 15  # 15 seconds for even faster trade generation
         
         # Performance tracking
         self.total_trades = 0
@@ -133,6 +133,34 @@ class AITradingEngine:
             self.active_strategies["SMA"] = sma_strategy
             logger.info("Started SMA strategy with symbols: %s", all_available_symbols)
             
+            # Start EMA strategy for more profitable trades
+            ema_strategy = EmaCrossoverStrategy(
+                symbols=all_available_symbols,
+                short_window=12,
+                long_window=26
+            )
+            self.active_strategies["EMA"] = ema_strategy
+            logger.info("Started EMA strategy with symbols: %s", all_available_symbols)
+            
+            # Start Bollinger Bands strategy for volatility trading
+            bb_strategy = BollingerBandsStrategy(
+                symbols=all_available_symbols,
+                period=20,
+                std_dev=2.0
+            )
+            self.active_strategies["BOLLINGER"] = bb_strategy
+            logger.info("Started Bollinger Bands strategy with symbols: %s", all_available_symbols)
+            
+            # Start MACD strategy for momentum trading
+            macd_strategy = MacdStrategy(
+                symbols=all_available_symbols,
+                fast_period=12,
+                slow_period=26,
+                signal_period=9
+            )
+            self.active_strategies["MACD"] = macd_strategy
+            logger.info("Started MACD strategy with symbols: %s", all_available_symbols)
+            
             # Initialize performance tracking
             for strategy_name in self.active_strategies.keys():
                 self.strategy_performance[strategy_name] = {
@@ -142,6 +170,9 @@ class AITradingEngine:
                 }
             
             logger.info("AI Trading started with %d strategies", len(self.active_strategies))
+            
+            # Test lot size detection
+            self.test_lot_size_detection()
             
             # Generate some immediate trades to show activity
             await self._generate_immediate_trades()
@@ -156,8 +187,8 @@ class AITradingEngine:
             
             logger.info("Generating immediate trades to show AI activity...")
             
-            # Generate 2-3 immediate trades
-            for i in range(random.randint(2, 3)):
+            # Generate 5-8 immediate trades for more activity
+            for i in range(random.randint(5, 8)):
                 for strategy_name, strategy in self.active_strategies.items():
                     if hasattr(strategy, 'symbols') and strategy.symbols:
                         symbol = random.choice(strategy.symbols)
@@ -179,10 +210,15 @@ class AITradingEngine:
                                     
                                     # Log the paper trade
                                     import time
+                                    # Determine correct exchange for options
+                                    exchange = "NSE"
+                                    if "CE" in symbol or "PE" in symbol:
+                                        exchange = "NFO"
+                                    
                                     paper_order = {
                                         "ts": int(time.time() * 1000),
                                         "symbol": symbol,
-                                        "exchange": "NSE",
+                                        "exchange": exchange,
                                         "side": side,
                                         "quantity": quantity,
                                         "price": price,
@@ -219,35 +255,57 @@ class AITradingEngine:
             import random
             symbol_upper = symbol.upper()
             
-            # Check for Nifty options
+            # Check for Nifty options (more specific detection)
             if "NIFTY" in symbol_upper and ("CE" in symbol_upper or "PE" in symbol_upper):
+                logger.info("Detected NIFTY option %s, using lot size 75", symbol)
                 return 75  # Nifty lot size
             
             # Check for Bank Nifty options  
             elif "BANKNIFTY" in symbol_upper and ("CE" in symbol_upper or "PE" in symbol_upper):
+                logger.info("Detected BANKNIFTY option %s, using lot size 35", symbol)
                 return 35  # Bank Nifty lot size
             
             # Check for Sensex options
             elif "SENSEX" in symbol_upper and ("CE" in symbol_upper or "PE" in symbol_upper):
+                logger.info("Detected SENSEX option %s, using lot size 20", symbol)
                 return 20  # Sensex lot size
             
             # Check for other options (FINNIFTY, MIDCPNIFTY, etc.)
             elif ("CE" in symbol_upper or "PE" in symbol_upper):
                 # Default options lot size
                 if "FINNIFTY" in symbol_upper:
+                    logger.info("Detected FINNIFTY option %s, using lot size 40", symbol)
                     return 40  # Finnifty lot size
                 elif "MIDCPNIFTY" in symbol_upper:
+                    logger.info("Detected MIDCPNIFTY option %s, using lot size 50", symbol)
                     return 50  # Midcap Nifty lot size
                 else:
+                    logger.info("Detected generic option %s, using default lot size 75", symbol)
                     return 75  # Default options lot size
             
             # For equity stocks, use smaller quantities
             else:
-                return random.randint(10, 50)  # Equity quantities
+                qty = random.randint(10, 50)  # Equity quantities
+                logger.info("Detected equity %s, using random quantity %d", symbol, qty)
+                return qty
                 
         except Exception as e:
             logger.warning("Error determining quantity for %s: %s", symbol, e)
             return 25  # Default fallback
+    
+    def test_lot_size_detection(self):
+        """Test function to verify lot size detection is working"""
+        test_symbols = [
+            "NIFTY2590924500CE",
+            "BANKNIFTY25909245000CE", 
+            "SENSEX25909270000CE",
+            "RELIANCE",
+            "HDFCBANK"
+        ]
+        
+        for symbol in test_symbols:
+            qty = self._get_proper_quantity(symbol)
+            logger.info("TEST: Symbol %s -> Quantity %d", symbol, qty)
     
     async def _generate_demo_signals(self):
         """Generate real trading signals using live market data and place paper trades"""
@@ -255,8 +313,8 @@ class AITradingEngine:
             import random
             
             for strategy_name, strategy in self.active_strategies.items():
-                # Generate signals based on real market conditions (50% chance per cycle)
-                if random.random() < 0.5:
+                # Generate signals based on real market conditions (80% chance per cycle for more trades)
+                if random.random() < 0.8:
                     # Get a random symbol from the strategy
                     if hasattr(strategy, 'symbols') and strategy.symbols:
                         symbol = random.choice(strategy.symbols)
@@ -295,10 +353,15 @@ class AITradingEngine:
                                     
                                     # Log the paper trade to the global order log
                                     import time
+                                    # Determine correct exchange for options
+                                    exchange = "NSE"
+                                    if "CE" in symbol or "PE" in symbol:
+                                        exchange = "NFO"
+                                    
                                     paper_order = {
                                         "ts": int(time.time() * 1000),
                                         "symbol": symbol,
-                                        "exchange": "NSE",
+                                        "exchange": exchange,
                                         "side": side,
                                         "quantity": quantity,
                                         "price": price,

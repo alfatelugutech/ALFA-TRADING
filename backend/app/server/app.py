@@ -679,6 +679,20 @@ def _get_ltp_for_symbol(exchange: str, symbol: str) -> float:
     
     # 1b) Fallback to broker LTP API for consistent pricing (equity/options)
     try:
+        # For options, try NFO exchange first
+        if exchange == "NSE" and ("CE" in symbol or "PE" in symbol):
+            # Try NFO exchange for options
+            try:
+                q = broker.kite.ltp(f"NFO:{symbol}")
+                key = f"NFO:{symbol}"
+                if q and key in q:
+                    last = float(q[key].get("last_price") or q[key].get("last_traded_price") or 0)
+                    if last > 0:
+                        return last
+            except Exception:
+                pass
+        
+        # Try the original exchange
         q = broker.kite.ltp(f"{exchange}:{symbol}")
         key = f"{exchange}:{symbol}"
         if q and key in q:
@@ -694,8 +708,23 @@ def _get_ltp_for_symbol(exchange: str, symbol: str) -> float:
             "RELIANCE": 1375.0,
             "TCS": 3046.8,
             "INFY": 1445.5,
-            "HDFCBANK": 1650.0,
-            "ICICIBANK": 950.0,
+            "HDFCBANK": 1600.0,
+            "ICICIBANK": 900.0,
+            # Options demo prices
+            "NIFTY2590924550CE": 294.15,
+            "NIFTY2590924600CE": 250.0,
+            "NIFTY2590924650CE": 200.0,
+            "NIFTY2590924700CE": 150.0,
+            "NIFTY2590924550PE": 50.0,
+            "NIFTY2590924600PE": 100.0,
+            "NIFTY2590924650PE": 150.0,
+            "NIFTY2590924700PE": 200.0,
+            "BANKNIFTY25909245000CE": 500.0,
+            "BANKNIFTY25909245100CE": 400.0,
+            "BANKNIFTY25909245200CE": 300.0,
+            "SENSEX25909270000CE": 800.0,
+            "SENSEX25909271000CE": 700.0,
+            "SENSEX25909272000CE": 600.0,
             "KOTAKBANK": 1750.0,
             "HINDUNILVR": 2450.0,
             "ITC": 450.0,
