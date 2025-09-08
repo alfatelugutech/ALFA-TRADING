@@ -42,9 +42,9 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
                 <details>
                   <summary>Reports ▾</summary>
                   <div className="card menu menu-left">
-                    <a href="/reports/portfolio">📊 Portfolio (Live) Reports</a>
-                    <a href="/reports/paper-trading">📄 Paper Trading Reports</a>
-                    <a href="/reports/manual-trading">🧭 Manual Trading Reports</a>
+                    <a href="/reports/portfolio">Portfolio (Live) Reports</a>
+                    <a href="/reports/paper-trading">Paper Trading Reports</a>
+                    <a href="/reports/manual-trading">Manual Trading Reports</a>
                   </div>
                 </details>
               </div>
@@ -52,9 +52,9 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
                 <details>
                   <summary>Trading ▾</summary>
                   <div className="card menu menu-left">
-                    <a href="/paper-trading">📄 Paper Trading</a>
-                    <a href="/trading-dashboard">🧭 Manual Trading</a>
-                    <a href="/ai-trading">🤖 AI Trading</a>
+                    <a href="/paper-trading">Paper Trading</a>
+                    <a href="/trading-dashboard">Manual Trading</a>
+                    <a href="/ai-trading">AI Trading</a>
                   </div>
                 </details>
               </div>
