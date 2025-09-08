@@ -320,6 +320,49 @@ export default function Home() {
           {status.auth ? "Authenticated" : "Not authenticated"} · WS {wsConnected ? "Connected" : "Disconnected"} · Mode {status.dry_run ? "Paper" : "Live"}
         </div>
       )}
+      
+      {/* Quick Trading Start */}
+      <div className="card" style={{ marginBottom: 12, backgroundColor: "#f8f9fa", border: "2px solid #007bff" }}>
+        <h3 style={{ margin: "0 0 12px 0", color: "#007bff" }}>🚀 Quick Start Trading</h3>
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 12 }}>
+          <a href="/trading-dashboard" style={{ 
+            padding: "12px 16px", 
+            backgroundColor: "#007bff", 
+            color: "white", 
+            textDecoration: "none", 
+            borderRadius: 6, 
+            textAlign: "center",
+            fontWeight: "bold"
+          }}>
+            📊 Trading Dashboard
+          </a>
+          <a href="/strategy-builder" style={{ 
+            padding: "12px 16px", 
+            backgroundColor: "#28a745", 
+            color: "white", 
+            textDecoration: "none", 
+            borderRadius: 6, 
+            textAlign: "center",
+            fontWeight: "bold"
+          }}>
+            📈 Start Strategy
+          </a>
+          <a href="/ai-trading" style={{ 
+            padding: "12px 16px", 
+            backgroundColor: "#6f42c1", 
+            color: "white", 
+            textDecoration: "none", 
+            borderRadius: 6, 
+            textAlign: "center",
+            fontWeight: "bold"
+          }}>
+            🤖 AI Trading
+          </a>
+        </div>
+        <div style={{ marginTop: 8, fontSize: "0.9em", color: "#6c757d" }}>
+          💡 <strong>Tip:</strong> Use the Trading Dashboard to easily start/stop strategies and monitor your trades!
+        </div>
+      </div>
       <div className="card" style={{ display: "flex", gap: 12, marginBottom: 12 }}>
         <select value={exchange} onChange={(e) => setExchange(e.target.value)}>
           <option value="NSE">NSE</option>
