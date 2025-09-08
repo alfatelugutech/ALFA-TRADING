@@ -40,7 +40,8 @@ type PnLState = {
   total: number;
 };
 
-const backendUrl = process.env.NEXT_PUBLIC_BACKEND_URL || "http://localhost:10000";
+// Use env if provided, otherwise fall back to current origin (works on Vercel)
+const backendUrl = process.env.NEXT_PUBLIC_BACKEND_URL || "";
 
 export default function TradingDashboard() {
   const [activeTab, setActiveTab] = useState<"overview" | "positions" | "orders" | "watchlist" | "charts">("overview");
@@ -55,9 +56,17 @@ export default function TradingDashboard() {
   const [toasts, setToasts] = useState<{ id: number; text: string; kind: "info" | "success" | "error" }[]>([]);
   const wsRef = useRef<WebSocket | null>(null);
 
-  // WebSocket connection for live data
+  // WebSocket connection for live data (safe on Vercel without env)
   useEffect(() => {
-    const ws = new WebSocket(backendUrl.replace(/^http/, "ws") + "/ws/ticks");
+    const base = (process.env.NEXT_PUBLIC_BACKEND_URL || (typeof window !== "undefined" ? window.location.origin : ""));
+    if (!base) return;
+    let ws: WebSocket | null = null;
+    try {
+      ws = new WebSocket(base.replace(/^http/, "ws") + "/ws/ticks");
+    } catch {
+      setWsConnected(false);
+      return;
+    }
     wsRef.current = ws;
     ws.onmessage = (evt) => {
       try {
@@ -73,7 +82,7 @@ export default function TradingDashboard() {
       wsRef.current = null;
       setWsConnected(false);
     };
-    return () => ws.close();
+    return () => { try { ws?.close(); } catch {} };
   }, []);
 
   // Load initial data
@@ -91,9 +100,12 @@ export default function TradingDashboard() {
     setTimeout(() => setToasts((t) => t.filter((x) => x.id !== id)), 3500);
   };
 
+  const api = (path: string) => (process.env.NEXT_PUBLIC_BACKEND_URL || (typeof window !== "undefined" ? window.location.origin : "")) + path;
+
   const loadPositions = async () => {
     try {
-      const data = await (await fetch(backendUrl + "/positions")).json();
+      const resp = await fetch(api("/positions"));
+      const data = await resp.json();
       setPositions(data || []);
     } catch (error) {
       pushToast("Failed to load positions", "error");
@@ -102,7 +114,8 @@ export default function TradingDashboard() {
 
   const loadOrders = async () => {
     try {
-      const data = await (await fetch(backendUrl + "/orders")).json();
+      const resp = await fetch(api("/orders"));
+      const data = await resp.json();
       setOrders(data || []);
     } catch (error) {
       pushToast("Failed to load orders", "error");
@@ -111,7 +124,8 @@ export default function TradingDashboard() {
 
   const loadPnL = async () => {
     try {
-      const data = await (await fetch(backendUrl + "/pnl")).json();
+      const resp = await fetch(api("/pnl"));
+      const data = await resp.json();
       setPnlState(data);
     } catch (error) {
       pushToast("Failed to load P&L", "error");
@@ -129,14 +143,15 @@ export default function TradingDashboard() {
 
   const loadStatus = async () => {
     try {
-      const data = await (await fetch(backendUrl + "/status/all")).json();
+      const resp = await fetch(api("/status/all"));
+      const data = await resp.json();
       if (typeof data?.dry_run === "boolean") setIsPaper(!!data.dry_run);
     } catch {}
   };
 
   const exitAllPositions = async () => {
     try {
-      await fetch(backendUrl + "/squareoff/all", { method: "POST" });
+      await fetch(api("/squareoff/all"), { method: "POST" });
       pushToast("Exit All triggered", "success");
       loadPositions();
     } catch (error) {
@@ -146,7 +161,7 @@ export default function TradingDashboard() {
 
   const exitPosition = async (symbol: string) => {
     try {
-      await fetch(backendUrl + "/squareoff", { 
+      await fetch(api("/squareoff"), { 
         method: "POST", 
         headers: { "Content-Type": "application/json" }, 
         body: JSON.stringify({ symbol }) 
@@ -161,7 +176,7 @@ export default function TradingDashboard() {
   const togglePaperLive = async () => {
     try {
       const wantLive = confirm("Switch to LIVE mode? (Cancel switches to PAPER)");
-      await fetch(backendUrl + "/config/dry_run", {
+      await fetch(api("/config/dry_run"), {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ value: !wantLive }),

@@ -54,7 +54,6 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
                   <div className="card menu menu-left">
                     <a href="/paper-trading">Paper Trading</a>
                     <a href="/trading-dashboard">Manual Trading</a>
-                    <a href="/ai-trading">AI Trading</a>
                   </div>
                 </details>
               </div>
