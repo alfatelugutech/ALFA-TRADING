@@ -27,6 +27,7 @@ from app.strategies.macd_strategy import MacdStrategy
 from app.strategies.support_resistance import SupportResistanceStrategy
 from app.strategies.options_straddle import OptionsStraddleStrategy
 from app.strategies.options_strangle import OptionsStrangleStrategy
+from app.strategies.options_touch_sma import OptionsTouchSmaStrategy
 from app.ai.market_analyzer import AIMarketAnalyzer
 from app.ai.trading_engine import AITradingEngine
 from app.risk.portfolio_manager import AdvancedPortfolioManager, RiskLevel
@@ -320,10 +321,15 @@ backtest_engine = BacktestEngine(initial_capital=100000)
 
 # Trailing stop
 trailing_stop_pct: float = float(os.getenv("TRAILING_STOP_PCT", "0.0") or 0.0)  # 0.02 => 2%
-# Absolute trailing distance in points (moves 1:1 with price once active)
+# Absolute trailing distance in points (legacy/global)
 trailing_stop_points: float = float(os.getenv("TRAILING_STOP_POINTS", "10") or 10.0)
+# Activation threshold (points of profit from entry before trailing becomes active)
+trailing_activation_points: float = float(os.getenv("TRAILING_ACTIVATION_POINTS", "10") or 10.0)
+# Trailing distance (points) to use after activation (default 1 rupee/point)
+trailing_points_after_activation: float = float(os.getenv("TRAILING_POINTS_AFTER_ACTIVATION", "1") or 1.0)
 trailing_state: Dict[str, Dict[str, float]] = {}
 trailing_overrides_pct: Dict[str, float] = {}  # key: EXCHANGE:SYMBOL -> pct
+trailing_overrides_points: Dict[str, float] = {}  # key: EXCHANGE:SYMBOL -> points override after activation
 
 # Authentication cache
 auth_cache = {
@@ -343,10 +349,13 @@ TRADING_HOURS = {
     "commodity": {"start": "09:00", "end": "23:30"}
 }
 
-# Auto-schedule
+# Auto-schedule (supports multiple strategies; falls back to single 'strategy')
 schedule_cfg: Dict[str, object] = {
     "enabled": False,
-    "strategy": "sma",  # sma|ema
+    # single strategy for backward compatibility; one of: sma, ema, rsi, bollinger, macd, support_resistance, options_straddle, options_strangle, all
+    "strategy": "sma",
+    # optional list of strategies to run (overrides 'strategy' when non-empty)
+    "strategies": [],
     "symbols": [],
     "exchange": "NSE",
     "short": 20,
@@ -355,8 +364,36 @@ schedule_cfg: Dict[str, object] = {
     "start": "09:15",
     "stop": "15:25",
     "square_off_eod": True,
+    # new controls
+    "skip_weekends": True,
+    # comma-separated or list of YYYY-MM-DD strings
+    "holidays": [],
+    "retry_on_fail": True,
+    "max_retries": 5,
+    # strategy-specific flags
+    "entry_on_touch": False,
 }
-_schedule_state: Dict[str, object] = {"started_on": "", "stopped_on": ""}
+_schedule_state: Dict[str, object] = {"started_on": "", "stopped_on": "", "attempts": 0, "last_error": ""}
+
+# Persist schedule config to data/schedule.json
+_SCHEDULE_FILE = Path("data/schedule.json")
+
+def _load_schedule_from_file() -> None:
+    try:
+        if _SCHEDULE_FILE.exists():
+            data = json.loads(_SCHEDULE_FILE.read_text(encoding="utf-8"))
+            if isinstance(data, dict):
+                schedule_cfg.update(data)
+                logger.info("Loaded schedule config from %s", _SCHEDULE_FILE)
+    except Exception:
+        logger.exception("Failed to load schedule config")
+
+def _save_schedule_to_file() -> None:
+    try:
+        _SCHEDULE_FILE.parent.mkdir(parents=True, exist_ok=True)
+        _SCHEDULE_FILE.write_text(json.dumps(schedule_cfg, ensure_ascii=False, indent=2), encoding="utf-8")
+    except Exception:
+        logger.exception("Failed to save schedule config")
 
 
 def ensure_ticker(mode_full: bool) -> MarketTicker:
@@ -439,8 +476,39 @@ def _on_ticks(ticks: List[dict]) -> None:
                         elif "FINNIFTY" in s.symbol:
                             lot = 40
                         qty_calc = qty_calc * lot
-                    logger.info("[DRY] Strategy signal %s %s qty=%s", s.side, s.symbol, qty_calc)
-                    _record_order(s.symbol, strategy_exchange, s.side, qty_calc, _get_ltp_for_symbol(strategy_exchange, s.symbol), True, source=("ai-" + name) if ai_active else ("strategy-" + name))
+                    # Options-touch execution: place ATM CE+PE entries/exits when underlying triggers
+                    if name == "options_touch_sma":
+                        try:
+                            # fetch ATM CE/PE from options chain helper (reuse options_atm_trade logic by simulating offset=0)
+                            # For DRY mode, emulate two orders at LTP
+                            under = s.symbol
+                            # Derive closest ATM CE/PE using /options/atm_trade logic
+                            chain = options_chain(under, "next", count=50, around=None)
+                            strikes = chain.get("strikes", [])
+                            if strikes:
+                                mid = strikes[len(strikes)//2]
+                                ce_sorted = sorted(chain.get("ce", []), key=lambda x: abs(float(x.get("strike", 0)) - mid))
+                                pe_sorted = sorted(chain.get("pe", []), key=lambda x: abs(float(x.get("strike", 0)) - mid))
+                                # determine offset and quantity from strategy if available
+                                try:
+                                    off = int(getattr(strategy, "offset", 0) or 0)
+                                    qtyo = int(getattr(strategy, "quantity", 1) or 1)
+                                except Exception:
+                                    off = 0; qtyo = 1
+                                ce_idx = min(len(ce_sorted)-1, max(0, off))
+                                pe_idx = min(len(pe_sorted)-1, max(0, off))
+                                picks = []
+                                if ce_sorted: picks.append(ce_sorted[ce_idx].get("tradingsymbol"))
+                                if pe_sorted: picks.append(pe_sorted[pe_idx].get("tradingsymbol"))
+                                for symo in [p for p in picks if p]:
+                                    px = _get_ltp_for_symbol("NFO", symo)
+                                    sideo = "BUY" if s.side == "BUY" else "SELL"
+                                    _record_order(symo, "NFO", sideo, qtyo, px, True, source="options-touch")
+                        except Exception:
+                            pass
+                    else:
+                        logger.info("[DRY] Strategy signal %s %s qty=%s", s.side, s.symbol, qty_calc)
+                        _record_order(s.symbol, strategy_exchange, s.side, qty_calc, _get_ltp_for_symbol(strategy_exchange, s.symbol), True, source=("ai-" + name) if ai_active else ("strategy-" + name))
                     continue
                 txn_type = broker.kite.TRANSACTION_TYPE_BUY if s.side == "BUY" else broker.kite.TRANSACTION_TYPE_SELL
                 try:
@@ -459,13 +527,41 @@ def _on_ticks(ticks: List[dict]) -> None:
                         elif "FINNIFTY" in s.symbol:
                             lot_l = 40
                         qty_live = qty_live * lot_l
-                    broker.place_market_order(
-                        tradingsymbol=s.symbol,
-                        exchange=strategy_exchange,
-                        quantity=qty_live,
-                        transaction_type=txn_type,
-                    )
-                    _record_order(s.symbol, strategy_exchange, s.side, qty_live, _get_ltp_for_symbol(strategy_exchange, s.symbol), False, source=("ai-" + name) if ai_active else ("strategy-" + name))
+                    if name == "options_touch_sma":
+                        # Live: place ATM CE/PE market orders
+                        try:
+                            under = s.symbol
+                            chain = options_chain(under, "next", count=50, around=None)
+                            strikes = chain.get("strikes", [])
+                            if strikes:
+                                mid = strikes[len(strikes)//2]
+                                ce_sorted = sorted(chain.get("ce", []), key=lambda x: abs(float(x.get("strike", 0)) - mid))
+                                pe_sorted = sorted(chain.get("pe", []), key=lambda x: abs(float(x.get("strike", 0)) - mid))
+                                try:
+                                    off = int(getattr(strategy, "offset", 0) or 0)
+                                    qtyo = int(getattr(strategy, "quantity", 1) or 1)
+                                except Exception:
+                                    off = 0; qtyo = 1
+                                ce_idx = min(len(ce_sorted)-1, max(0, off))
+                                pe_idx = min(len(pe_sorted)-1, max(0, off))
+                                picks = []
+                                if ce_sorted: picks.append(ce_sorted[ce_idx].get("tradingsymbol"))
+                                if pe_sorted: picks.append(pe_sorted[pe_idx].get("tradingsymbol"))
+                                for symo in [p for p in picks if p]:
+                                    txn = broker.kite.TRANSACTION_TYPE_BUY if s.side == "BUY" else broker.kite.TRANSACTION_TYPE_SELL
+                                    broker.place_market_order(tradingsymbol=symo, exchange="NFO", quantity=qtyo, transaction_type=txn)
+                                    px = _get_ltp_for_symbol("NFO", symo)
+                                    _record_order(symo, "NFO", "BUY" if s.side == "BUY" else "SELL", qtyo, px, False, source="options-touch")
+                        except Exception:
+                            logger.exception("options_touch live place failed")
+                    else:
+                        broker.place_market_order(
+                            tradingsymbol=s.symbol,
+                            exchange=strategy_exchange,
+                            quantity=qty_live,
+                            transaction_type=txn_type,
+                        )
+                        _record_order(s.symbol, strategy_exchange, s.side, qty_live, _get_ltp_for_symbol(strategy_exchange, s.symbol), False, source=("ai-" + name) if ai_active else ("strategy-" + name))
                 except Exception:
                     logger.exception("Order placement failed for %s", s.symbol)
         except Exception:
@@ -489,13 +585,19 @@ def _on_ticks(ticks: List[dict]) -> None:
                     # choose per-symbol override if set
                     k = f"{strategy_exchange}:{sym}"
                     pct = float(trailing_overrides_pct.get(k, trailing_stop_pct))
-                    st = trailing_state.setdefault(k, {"max": ltp, "min": ltp, "trail_price": 0.0})
+                    pts_override = float(trailing_overrides_points.get(k, 0.0) or 0.0)
+                    st = trailing_state.setdefault(k, {"max": ltp, "min": ltp, "trail_price": 0.0, "activated": False, "entry": float(avg)})
                     # Update running extremes for both sides
                     if qty > 0:
                         # Long position: move max up and compute trailing by pct or points
                         st["max"] = max(st.get("max", ltp), ltp)
+                        # Activate trailing once profit >= activation threshold
+                        if not st.get("activated") and (ltp - st.get("entry", avg)) >= max(0.0, trailing_activation_points):
+                            st["activated"] = True
                         trail_pct = st["max"] * (1.0 - max(0.0, pct)) if pct > 0 else None
-                        trail_pts = st["max"] - max(0.0, trailing_stop_points)
+                        # Use points override after activation; else global points
+                        base_points = pts_override if (st.get("activated") and pts_override > 0) else trailing_points_after_activation if st.get("activated") else trailing_stop_points
+                        trail_pts = st["max"] - max(0.0, base_points)
                         # choose the tighter stop if both configured
                         candidates = [v for v in [trail_pct, trail_pts] if v and v > 0]
                         if candidates:
@@ -505,8 +607,11 @@ def _on_ticks(ticks: List[dict]) -> None:
                     elif qty < 0:
                         # Short position: move min down and compute trailing
                         st["min"] = min(st.get("min", ltp), ltp)
+                        if not st.get("activated") and (st.get("entry", avg) - ltp) >= max(0.0, trailing_activation_points):
+                            st["activated"] = True
                         trail_pct = st["min"] * (1.0 + max(0.0, pct)) if pct > 0 else None
-                        trail_pts = st["min"] + max(0.0, trailing_stop_points)
+                        base_points = pts_override if (st.get("activated") and pts_override > 0) else trailing_points_after_activation if st.get("activated") else trailing_stop_points
+                        trail_pts = st["min"] + max(0.0, base_points)
                         candidates = [v for v in [trail_pct, trail_pts] if v and v > 0]
                         if candidates:
                             st["trail_price"] = min(candidates)
@@ -516,6 +621,36 @@ def _on_ticks(ticks: List[dict]) -> None:
                     pass
         except Exception:
             logger.exception("Auto close evaluation failed")
+
+    # Exit rule: three consecutive adverse candles
+    try:
+        holds = _get_holdings()
+        for sym, h in holds.items():
+            q = int(h.get("quantity", 0))
+            if q == 0:
+                continue
+            tok = symbol_to_token.get(sym)
+            if not tok:
+                continue
+            # collect last 3 closes for this token if available
+            def close_of(t: dict) -> float:
+                return float(t.get("last_price") or t.get("last_traded_price") or t.get("ltp") or 0)
+            # latest_ticks stores by token; we only have the latest, so we approximate using enriched ticks order
+            # Fallback: skip if we cannot evaluate safely
+            closes: List[float] = []
+            for t in ticks[-3:]:
+                if t.get("instrument_token") == tok:
+                    c = close_of(t)
+                    if c > 0:
+                        closes.append(c)
+            if len(closes) < 3:
+                continue
+            if q > 0 and closes[0] > closes[1] > closes[2]:
+                _square_off(sym, q, reason="3RED")
+            elif q < 0 and closes[0] < closes[1] < closes[2]:
+                _square_off(sym, -q, reason="3GREEN")
+    except Exception:
+        pass
 
 
 @app.get("/health")
@@ -1078,6 +1213,69 @@ def history(symbol: Optional[str] = None, exchange: str = "NSE", interval: str =
         return {}
 
 
+@app.get("/history/heikin_ashi")
+def history_heikin_ashi(symbol: Optional[str] = None, exchange: str = "NSE", interval: str = "minute", count: int = 180):
+    """Return Heikin Ashi candles derived from /history."""
+    try:
+        base = history(symbol=symbol, exchange=exchange, interval=interval, count=count)
+        src = base.get("candles") or []
+        ha: List[dict] = []
+        prev_ha_open = None
+        prev_ha_close = None
+        for i, c in enumerate(src):
+            o = float(c.get("open", 0)); h = float(c.get("high", 0)); l = float(c.get("low", 0)); cl = float(c.get("close", 0))
+            ha_close = (o + h + l + cl) / 4.0
+            if i == 0:
+                ha_open = (o + cl) / 2.0
+            else:
+                ha_open = (prev_ha_open + prev_ha_close) / 2.0
+            ha_high = max(h, ha_open, ha_close)
+            ha_low = min(l, ha_open, ha_close)
+            prev_ha_open = ha_open; prev_ha_close = ha_close
+            ha.append({"time": c.get("time"), "open": round(ha_open, 2), "high": round(ha_high, 2), "low": round(ha_low, 2), "close": round(ha_close, 2), "volume": c.get("volume", 0)})
+        return {"candles": ha}
+    except Exception:
+        logger.exception("heikin_ashi failed")
+        return {"candles": []}
+
+
+@app.get("/patterns/candles")
+def detect_candlestick_patterns(symbol: str, exchange: str = "NSE", interval: str = "minute", count: int = 100):
+    """Detect basic candlestick patterns over recent history."""
+    try:
+        data = history(symbol=symbol, exchange=exchange, interval=interval, count=count)
+        candles = data.get("candles") or []
+        patterns: List[dict] = []
+        def body(o, c):
+            return abs(c - o)
+        for i in range(2, len(candles)):
+            a = candles[i-2]; b = candles[i-1]; c = candles[i]
+            ao, ac = float(a["open"]), float(a["close"])
+            bo, bc = float(b["open"]), float(b["close"])
+            co, cc = float(c["open"]), float(c["close"])
+            ah, al = float(a["high"]), float(a["low"])
+            bh, bl = float(b["high"]), float(b["low"])
+            ch, cl = float(c["high"]), float(c["low"])
+            # Engulfing
+            if bc > bo and ac < ao and bc >= ao and bo <= ac:
+                patterns.append({"index": i-1, "name": "Bullish Engulfing"})
+            if bc < bo and ac > ao and bo >= ac and bc <= ao:
+                patterns.append({"index": i-1, "name": "Bearish Engulfing"})
+            # Doji
+            if body(bc, bo) <= max(0.01, 0.1 * max(1.0, body(ao, ac))):
+                patterns.append({"index": i-1, "name": "Doji"})
+            # Morning Star
+            if ac < ao and body(bc, bo) < body(ao, ac) * 0.5 and cc > co and cc > ((ao + ac)/2):
+                patterns.append({"index": i, "name": "Morning Star"})
+            # Evening Star
+            if ac > ao and body(bc, bo) < body(ao, ac) * 0.5 and cc < co and cc < ((ao + ac)/2):
+                patterns.append({"index": i, "name": "Evening Star"})
+        return {"patterns": patterns, "count": len(patterns)}
+    except Exception:
+        logger.exception("pattern detect failed")
+        return {"patterns": [], "count": 0}
+
+
 def _get_ltp_for_symbol(exchange: str, symbol: str) -> float:
     # 1) Try latest websocket tick if we have the token
     try:
@@ -1319,6 +1517,7 @@ class SmaStartRequest(BaseModel):
     short: int = 20
     long: int = 50
     live: bool = False
+    entry_on_touch: Optional[bool] = False
 
 
 @app.post("/strategy/sma/start")
@@ -1340,7 +1539,7 @@ def strategy_sma_start(req: SmaStartRequest):
     ensure_ticker(mode_full=False)
     ticker.subscribe(mapping.values())
     # Init strategy
-    strategy = SmaCrossoverStrategy(symbols=list(mapping.keys()), short_window=req.short, long_window=req.long)
+    strategy = SmaCrossoverStrategy(symbols=list(mapping.keys()), short_window=req.short, long_window=req.long, entry_on_touch=bool(getattr(req, "entry_on_touch", False)))
     strategy_active = True
     strategy_live = bool(req.live)
     strategy_exchange = req.exchange
@@ -1608,6 +1807,37 @@ def strategy_options_strangle_start(req: OptionsStrangleStartRequest):
     return {"status": "started", "type": "options_strangle", "symbols": list(mapping.keys()), "live": strategy_live}
 
 
+class OptionsTouchSmaStartRequest(BaseModel):
+    symbols: List[str]
+    exchange: str = "NSE"
+    length: int = 21
+    live: bool = False
+    offset: int = 0
+    quantity: int = 1
+
+
+@app.post("/strategy/options_touch_sma/start")
+def strategy_options_touch_sma_start(req: OptionsTouchSmaStartRequest):
+    """Start SMA(21) touch strategy on underlyings; execution layer will place CE/PE on events."""
+    global strategy, strategy_active, strategy_live, strategy_exchange, symbol_to_token, token_to_symbol
+    auth_ok, user_id = _check_auth_or_demo()
+    if not auth_ok:
+        return {"error": "NOT_AUTHENTICATED"}
+    syms = req.symbols or []
+    mapping = resolve_tokens_by_symbols(instruments, syms, exchange=req.exchange)
+    if not mapping:
+        return {"error": "SYMBOLS_NOT_FOUND", "symbols": syms}
+    symbol_to_token.update(mapping)
+    token_to_symbol.update({v: k for k, v in mapping.items()})
+    ensure_ticker(mode_full=False)
+    ticker.subscribe(mapping.values())
+    strategy = OptionsTouchSmaStrategy(symbols=list(mapping.keys()), length=int(req.length or 21), offset=int(req.offset or 0), quantity=int(req.quantity or 1))
+    strategy_active = True
+    strategy_live = bool(req.live)
+    strategy_exchange = req.exchange
+    return {"status": "started", "type": "options_touch_sma", "symbols": list(mapping.keys()), "live": strategy_live}
+
+
 @app.get("/orders")
 def orders():
     return order_log[-200:]
@@ -1738,17 +1968,21 @@ class RiskConfig(BaseModel):
     tp_pct: float = 0.0
     auto_close: bool = False
     trailing_stop_pct: float = 0.0
+    # optional advanced trailing controls
+    activation_points: float | None = None
+    points_after_activation: float | None = None
 
 
 class TrailingOverrideBody(BaseModel):
     symbol: str
     exchange: str = "NSE"
-    pct: float
+    pct: float | None = None
+    points: float | None = None
 
 
 @app.get("/risk")
 def get_risk():
-    return {"sl_pct": risk_sl_pct, "tp_pct": risk_tp_pct, "auto_close": risk_auto_close, "trailing_stop_pct": trailing_stop_pct}
+    return {"sl_pct": risk_sl_pct, "tp_pct": risk_tp_pct, "auto_close": risk_auto_close, "trailing_stop_pct": trailing_stop_pct, "activation_points": trailing_activation_points, "points_after_activation": trailing_points_after_activation, "exit_three_candles": True}
 
 
 @app.post("/risk")
@@ -1757,8 +1991,18 @@ def set_risk(cfg_req: RiskConfig):
     risk_sl_pct = float(cfg_req.sl_pct)
     risk_tp_pct = float(cfg_req.tp_pct)
     risk_auto_close = bool(cfg_req.auto_close)
-    global trailing_stop_pct
+    global trailing_stop_pct, trailing_activation_points, trailing_points_after_activation
     trailing_stop_pct = float(cfg_req.trailing_stop_pct)
+    if cfg_req.activation_points is not None:
+        try:
+            trailing_activation_points = float(cfg_req.activation_points)
+        except Exception:
+            pass
+    if cfg_req.points_after_activation is not None:
+        try:
+            trailing_points_after_activation = float(cfg_req.points_after_activation)
+        except Exception:
+            pass
     logger.info("Risk updated sl=%.4f tp=%.4f auto=%s", risk_sl_pct, risk_tp_pct, risk_auto_close)
     return get_risk()
 
@@ -1766,11 +2010,107 @@ def set_risk(cfg_req: RiskConfig):
 @app.post("/risk/trailing/override")
 def set_trailing_override(body: TrailingOverrideBody):
     k = f"{body.exchange.upper()}:{body.symbol.upper()}"
-    if body.pct <= 0:
-        trailing_overrides_pct.pop(k, None)
-    else:
-        trailing_overrides_pct[k] = float(body.pct)
-    return {"overrides": trailing_overrides_pct}
+    if body.pct is not None:
+        if body.pct <= 0:
+            trailing_overrides_pct.pop(k, None)
+        else:
+            trailing_overrides_pct[k] = float(body.pct)
+    if body.points is not None:
+        if body.points <= 0:
+            trailing_overrides_points.pop(k, None)
+        else:
+            trailing_overrides_points[k] = float(body.points)
+    return {"overrides_pct": trailing_overrides_pct, "overrides_points": trailing_overrides_points}
+
+
+# Reports: CSV/PDF for paper vs live
+def _orders_by_mode(is_paper: bool) -> List[dict]:
+    return [o for o in order_log if bool(o.get("dry_run")) == is_paper]
+
+
+@app.get("/reports/paper/csv")
+def reports_paper_csv():
+    rows = _orders_by_mode(True)
+    header = ["ts","symbol","exchange","side","quantity","price","source"]
+    out = [",".join(header)]
+    for o in rows:
+        out.append(
+            ",".join([
+                str(o.get("ts")),
+                str(o.get("symbol")),
+                str(o.get("exchange")),
+                str(o.get("side")),
+                str(o.get("quantity")),
+                f"{float(o.get('price',0)):.2f}",
+                str(o.get("source","")),
+            ])
+        )
+    from fastapi.responses import PlainTextResponse
+    return PlainTextResponse("\n".join(out), media_type="text/csv")
+
+
+@app.get("/reports/manual/csv")
+def reports_manual_csv():
+    rows = _orders_by_mode(False)
+    header = ["ts","symbol","exchange","side","quantity","price","source"]
+    out = [",".join(header)]
+    for o in rows:
+        out.append(
+            ",".join([
+                str(o.get("ts")),
+                str(o.get("symbol")),
+                str(o.get("exchange")),
+                str(o.get("side")),
+                str(o.get("quantity")),
+                f"{float(o.get('price',0)):.2f}",
+                str(o.get("source","")),
+            ])
+        )
+    from fastapi.responses import PlainTextResponse
+    return PlainTextResponse("\n".join(out), media_type="text/csv")
+
+
+@app.get("/reports/paper/pdf")
+def reports_paper_pdf():
+    # Simple HTML for printing; Vercel/browser can render to PDF via print dialog
+    rows = _orders_by_mode(True)
+    html_rows = "".join([
+        f"<tr><td>{o.get('ts')}</td><td>{o.get('symbol')}</td><td>{o.get('exchange')}</td><td>{o.get('side')}</td><td style='text-align:right'>{o.get('quantity')}</td><td style='text-align:right'>{float(o.get('price',0)):.2f}</td><td>{o.get('source','')}</td></tr>"
+        for o in rows
+    ])
+    html = f"""
+    <html><body>
+      <h3>Paper Trading Report</h3>
+      <table border='1' cellspacing='0' cellpadding='4' style='border-collapse:collapse;width:100%'>
+        <thead><tr><th>Time</th><th>Symbol</th><th>Exch</th><th>Side</th><th>Qty</th><th>Price</th><th>Source</th></tr></thead>
+        <tbody>{html_rows}</tbody>
+      </table>
+      <script>window.print();</script>
+    </body></html>
+    """
+    from fastapi.responses import HTMLResponse
+    return HTMLResponse(content=html)
+
+
+@app.get("/reports/manual/pdf")
+def reports_manual_pdf():
+    rows = _orders_by_mode(False)
+    html_rows = "".join([
+        f"<tr><td>{o.get('ts')}</td><td>{o.get('symbol')}</td><td>{o.get('exchange')}</td><td>{o.get('side')}</td><td style='text-align:right'>{o.get('quantity')}</td><td style='text-align:right'>{float(o.get('price',0)):.2f}</td><td>{o.get('source','')}</td></tr>"
+        for o in rows
+    ])
+    html = f"""
+    <html><body>
+      <h3>Manual Trading Report</h3>
+      <table border='1' cellspacing='0' cellpadding='4' style='border-collapse:collapse;width:100%'>
+        <thead><tr><th>Time</th><th>Symbol</th><th>Exch</th><th>Side</th><th>Qty</th><th>Price</th><th>Source</th></tr></thead>
+        <tbody>{html_rows}</tbody>
+      </table>
+      <script>window.print();</script>
+    </body></html>
+    """
+    from fastapi.responses import HTMLResponse
+    return HTMLResponse(content=html)
 
 
 def _parse_hhmm(value: str) -> dtime:
@@ -1790,6 +2130,16 @@ async def _scheduler_loop():
                 today_key = now.strftime("%Y-%m-%d")
                 start_t = _parse_hhmm(str(schedule_cfg.get("start", "09:15")))
                 stop_t = _parse_hhmm(str(schedule_cfg.get("stop", "15:25")))
+                # Weekend / holiday skip
+                if bool(schedule_cfg.get("skip_weekends", True)) and now.weekday() >= 5:
+                    await asyncio.sleep(30)
+                    continue
+                holidays = schedule_cfg.get("holidays") or []
+                if isinstance(holidays, str):
+                    holidays = [x.strip() for x in holidays.split(",") if x.strip()]
+                if today_key in set(holidays):
+                    await asyncio.sleep(30)
+                    continue
 
                 # START
                 if _schedule_state.get("started_on") != today_key and now.time() >= start_t:
@@ -1798,22 +2148,93 @@ async def _scheduler_loop():
                     if not sym:
                         sym = ai_default_symbols
                     if sym:
-                        if schedule_cfg.get("strategy") == "ema":
-                            strategy_ema_start(EmaStartRequest(
-                                symbols=sym,
-                                exchange=str(schedule_cfg.get("exchange", "NSE")),
-                                short=int(schedule_cfg.get("short", 12)),
-                                long=int(schedule_cfg.get("long", 26)),
-                                live=bool(schedule_cfg.get("live", False)),
-                            ))
+                        # Determine strategies to run
+                        strats = schedule_cfg.get("strategies") or []
+                        if not strats:
+                            strats = [str(schedule_cfg.get("strategy", "sma"))]
+                        def _start_one(name: str) -> None:
+                            name = (name or "sma").lower()
+                            if name == "sma":
+                                strategy_sma_start(SmaStartRequest(
+                                    symbols=sym,
+                                    exchange=str(schedule_cfg.get("exchange", "NSE")),
+                                    short=int(schedule_cfg.get("short", 20)),
+                                    long=int(schedule_cfg.get("long", 50)),
+                                    live=bool(schedule_cfg.get("live", False)),
+                                ))
+                            elif name == "ema":
+                                strategy_ema_start(EmaStartRequest(
+                                    symbols=sym,
+                                    exchange=str(schedule_cfg.get("exchange", "NSE")),
+                                    short=int(schedule_cfg.get("short", 12)),
+                                    long=int(schedule_cfg.get("long", 26)),
+                                    live=bool(schedule_cfg.get("live", False)),
+                                ))
+                            elif name == "rsi":
+                                strategy_rsi_start(RsiStartRequest(
+                                    symbols=sym,
+                                    exchange=str(schedule_cfg.get("exchange", "NSE")),
+                                    period=14,
+                                    oversold=30.0,
+                                    overbought=70.0,
+                                    live=bool(schedule_cfg.get("live", False)),
+                                ))
+                            elif name == "bollinger":
+                                strategy_bollinger_start(BollingerStartRequest(
+                                    symbols=sym,
+                                    exchange=str(schedule_cfg.get("exchange", "NSE")),
+                                    period=20,
+                                    std_dev=2.0,
+                                    live=bool(schedule_cfg.get("live", False)),
+                                ))
+                            elif name == "macd":
+                                strategy_macd_start(MacdStartRequest(
+                                    symbols=sym,
+                                    exchange=str(schedule_cfg.get("exchange", "NSE")),
+                                    fast_period=12,
+                                    slow_period=26,
+                                    signal_period=9,
+                                    live=bool(schedule_cfg.get("live", False)),
+                                ))
+                            elif name == "support_resistance":
+                                strategy_support_resistance_start(SupportResistanceStartRequest(
+                                    symbols=sym,
+                                    exchange=str(schedule_cfg.get("exchange", "NSE")),
+                                    lookback_period=50,
+                                    breakout_threshold=0.01,
+                                    live=bool(schedule_cfg.get("live", False)),
+                                ))
+                            elif name == "options_straddle":
+                                strategy_options_straddle_start(OptionsStraddleStartRequest(
+                                    symbols=sym,
+                                    underlying=(sym[0] if sym else "NIFTY"),
+                                    expiry="next",
+                                    quantity=1,
+                                    volatility_threshold=0.02,
+                                    live=bool(schedule_cfg.get("live", False)),
+                                ))
+                            elif name == "options_strangle":
+                                strategy_options_strangle_start(OptionsStrangleStartRequest(
+                                    symbols=sym,
+                                    underlying=(sym[0] if sym else "NIFTY"),
+                                    expiry="next",
+                                    quantity=1,
+                                    volatility_threshold=0.02,
+                                    otm_offset=2,
+                                    live=bool(schedule_cfg.get("live", False)),
+                                ))
+                        if "all" in [s.lower() for s in strats]:
+                            for nm in ["sma","ema","rsi","bollinger","macd","support_resistance"]:
+                                try:
+                                    _start_one(nm)
+                                except Exception as e:
+                                    _schedule_state["last_error"] = str(e)
                         else:
-                            strategy_sma_start(SmaStartRequest(
-                                symbols=sym,
-                                exchange=str(schedule_cfg.get("exchange", "NSE")),
-                                short=int(schedule_cfg.get("short", 20)),
-                                long=int(schedule_cfg.get("long", 50)),
-                                live=bool(schedule_cfg.get("live", False)),
-                            ))
+                            for nm in strats:
+                                try:
+                                    _start_one(nm)
+                                except Exception as e:
+                                    _schedule_state["last_error"] = str(e)
                         _schedule_state["started_on"] = today_key
                         logger.info("Auto-started strategy via schedule")
 
@@ -1836,6 +2257,10 @@ async def _scheduler_loop():
 
 @app.on_event("startup")
 async def _startup():
+    try:
+        _load_schedule_from_file()
+    except Exception:
+        pass
     asyncio.create_task(_scheduler_loop())
 
 
@@ -1850,6 +2275,9 @@ class ScheduleBody(BaseModel):
     start: str = "09:15"
     stop: str = "15:25"
     square_off_eod: bool = True
+    entry_on_touch: Optional[bool] = False
+    options_touch_offset: Optional[int] = 0
+    options_touch_quantity: Optional[int] = 1
 
 
 @app.get("/schedule")
@@ -1862,6 +2290,8 @@ def set_schedule(body: ScheduleBody):
     schedule_cfg.update({
         "enabled": bool(body.enabled),
         "strategy": body.strategy,
+        # allow clients to pass optional strategies list
+        "strategies": list(schedule_cfg.get("strategies") or []),
         "symbols": [s.upper() for s in body.symbols],
         "exchange": body.exchange,
         "short": int(body.short),
@@ -1870,7 +2300,11 @@ def set_schedule(body: ScheduleBody):
         "start": body.start,
         "stop": body.stop,
         "square_off_eod": bool(body.square_off_eod),
+        "entry_on_touch": bool(getattr(body, "entry_on_touch", schedule_cfg.get("entry_on_touch", False))),
+        "options_touch_offset": int(getattr(body, "options_touch_offset", schedule_cfg.get("options_touch_offset", 0)) or 0),
+        "options_touch_quantity": int(getattr(body, "options_touch_quantity", schedule_cfg.get("options_touch_quantity", 1)) or 1),
     })
+    _save_schedule_to_file()
     logger.info("Schedule updated: %s", schedule_cfg)
     return get_schedule()
 
