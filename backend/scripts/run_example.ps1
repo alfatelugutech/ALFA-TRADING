@@ -24,3 +24,4 @@ if ($Full) { $argsList += "--full" } else { $argsList += "--ltp" }
 if ($Live) { $argsList += "--live" }
 python ..\backend\main.py @argsList
 
+

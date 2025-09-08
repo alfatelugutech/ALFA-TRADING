@@ -19,3 +19,4 @@ class BaseStrategy:
         raise NotImplementedError
 
 
+

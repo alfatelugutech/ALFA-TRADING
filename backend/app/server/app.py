@@ -18,8 +18,17 @@ from app.config import get_config
 from app.logging_setup import setup_logging
 from app.broker.zerodha_client import ZerodhaClient
 from app.market.ticker import MarketTicker
+from app.strategies.base import BaseStrategy
 from app.strategies.sma_crossover import SmaCrossoverStrategy
 from app.strategies.ema_crossover import EmaCrossoverStrategy
+from app.strategies.rsi_strategy import RsiStrategy
+from app.strategies.bollinger_bands import BollingerBandsStrategy
+from app.strategies.macd_strategy import MacdStrategy
+from app.strategies.support_resistance import SupportResistanceStrategy
+from app.strategies.options_straddle import OptionsStraddleStrategy
+from app.strategies.options_strangle import OptionsStrangleStrategy
+from app.ai.market_analyzer import AIMarketAnalyzer
+from app.ai.trading_engine import AITradingEngine
 from app.utils.symbols import load_instruments, resolve_tokens_by_symbols, search_symbols
 
 
@@ -109,7 +118,7 @@ ticker: Optional[MarketTicker] = None
 strategy_active: bool = False
 strategy_live: bool = False
 strategy_exchange: str = "NSE"
-strategy: Optional[SmaCrossoverStrategy] = None
+strategy: Optional[BaseStrategy] = None
 last_strategy_signals: List[dict] = []
 
 # Order log (paper + live)
@@ -127,11 +136,15 @@ paper_risk_per_trade_pct: float = float(os.getenv("PAPER_RISK_PER_TRADE_PCT", "0
 
 # AI trading config
 ai_active: bool = False
-ai_trade_capital: float = float(os.getenv("AI_TRADE_CAPITAL", "10000") or 10000)
-ai_risk_pct: float = float(os.getenv("AI_RISK_PCT", "0.01") or 0.01)
-ai_default_symbols: List[str] = [s.strip().upper() for s in (os.getenv("AI_DEFAULT_SYMBOLS", "TCS INFY RELIANCE") or "").split()] if os.getenv("AI_DEFAULT_SYMBOLS", "TCS INFY RELIANCE") else []
-ai_options_underlyings: List[str] = [s.strip().upper() for s in (os.getenv("AI_OPTIONS_UNDERLYINGS", "NIFTY BANKNIFTY") or "").split()] if os.getenv("AI_OPTIONS_UNDERLYINGS", "NIFTY BANKNIFTY") else []
+ai_trade_capital: float = float(os.getenv("AI_TRADE_CAPITAL", "100000") or 100000)
+ai_risk_pct: float = float(os.getenv("AI_RISK_PCT", "0.02") or 0.02)
+ai_default_symbols: List[str] = [s.strip().upper() for s in (os.getenv("AI_DEFAULT_SYMBOLS", "RELIANCE TCS INFY HDFCBANK ICICIBANK KOTAKBANK HINDUNILVR ITC BHARTIARTL SBIN LT ASIANPAINT MARUTI AXISBANK NESTLEIND ULTRACEMCO SUNPHARMA TITAN POWERGRID NTPC") or "").split()] if os.getenv("AI_DEFAULT_SYMBOLS") else []
+ai_options_underlyings: List[str] = [s.strip().upper() for s in (os.getenv("AI_OPTIONS_UNDERLYINGS", "NIFTY BANKNIFTY SENSEX FINNIFTY") or "").split()] if os.getenv("AI_OPTIONS_UNDERLYINGS") else []
 ai_options_qty: int = int(os.getenv("AI_OPTIONS_QTY", "1") or 1)
+
+# AI Trading Engine
+ai_engine: Optional[AITradingEngine] = None
+ai_analyzer = AIMarketAnalyzer()
 
 # Trailing stop
 trailing_stop_pct: float = float(os.getenv("TRAILING_STOP_PCT", "0.0") or 0.0)  # 0.02 => 2%
@@ -201,6 +214,18 @@ def _on_ticks(ticks: List[dict]) -> None:
                         return "sma"
                     if isinstance(strategy, EmaCrossoverStrategy):
                         return "ema"
+                    if isinstance(strategy, RsiStrategy):
+                        return "rsi"
+                    if isinstance(strategy, BollingerBandsStrategy):
+                        return "bollinger"
+                    if isinstance(strategy, MacdStrategy):
+                        return "macd"
+                    if isinstance(strategy, SupportResistanceStrategy):
+                        return "support_resistance"
+                    if isinstance(strategy, OptionsStraddleStrategy):
+                        return "options_straddle"
+                    if isinstance(strategy, OptionsStrangleStrategy):
+                        return "options_strangle"
                 except Exception:
                     pass
                 return "unknown"
@@ -822,6 +847,217 @@ def strategy_ema_start(req: EmaStartRequest):
     return {"status": "started", "type": "ema", "symbols": list(mapping.keys()), "live": strategy_live}
 
 
+class RsiStartRequest(BaseModel):
+    symbols: List[str]
+    exchange: str = "NSE"
+    period: int = 14
+    oversold: float = 30.0
+    overbought: float = 70.0
+    live: bool = False
+
+
+@app.post("/strategy/rsi/start")
+def strategy_rsi_start(req: RsiStartRequest):
+    global strategy, strategy_active, strategy_live, strategy_exchange, symbol_to_token, token_to_symbol
+    try:
+        broker.kite.profile()
+    except Exception:
+        return {"error": "NOT_AUTHENTICATED"}
+    syms = req.symbols or []
+    if not syms:
+        syms = ai_default_symbols
+    mapping = resolve_tokens_by_symbols(instruments, syms, exchange=req.exchange)
+    if not mapping:
+        return {"error": "SYMBOLS_NOT_FOUND", "symbols": syms}
+    symbol_to_token.update(mapping)
+    token_to_symbol.update({v: k for k, v in mapping.items()})
+    ensure_ticker(mode_full=False)
+    ticker.subscribe(mapping.values())
+    strategy = RsiStrategy(symbols=list(mapping.keys()), period=req.period, 
+                          oversold=req.oversold, overbought=req.overbought)
+    strategy_active = True
+    strategy_live = bool(req.live)
+    strategy_exchange = req.exchange
+    return {"status": "started", "type": "rsi", "symbols": list(mapping.keys()), "live": strategy_live}
+
+
+class BollingerStartRequest(BaseModel):
+    symbols: List[str]
+    exchange: str = "NSE"
+    period: int = 20
+    std_dev: float = 2.0
+    live: bool = False
+
+
+@app.post("/strategy/bollinger/start")
+def strategy_bollinger_start(req: BollingerStartRequest):
+    global strategy, strategy_active, strategy_live, strategy_exchange, symbol_to_token, token_to_symbol
+    try:
+        broker.kite.profile()
+    except Exception:
+        return {"error": "NOT_AUTHENTICATED"}
+    syms = req.symbols or []
+    if not syms:
+        syms = ai_default_symbols
+    mapping = resolve_tokens_by_symbols(instruments, syms, exchange=req.exchange)
+    if not mapping:
+        return {"error": "SYMBOLS_NOT_FOUND", "symbols": syms}
+    symbol_to_token.update(mapping)
+    token_to_symbol.update({v: k for k, v in mapping.items()})
+    ensure_ticker(mode_full=False)
+    ticker.subscribe(mapping.values())
+    strategy = BollingerBandsStrategy(symbols=list(mapping.keys()), period=req.period, 
+                                     std_dev=req.std_dev)
+    strategy_active = True
+    strategy_live = bool(req.live)
+    strategy_exchange = req.exchange
+    return {"status": "started", "type": "bollinger", "symbols": list(mapping.keys()), "live": strategy_live}
+
+
+class MacdStartRequest(BaseModel):
+    symbols: List[str]
+    exchange: str = "NSE"
+    fast_period: int = 12
+    slow_period: int = 26
+    signal_period: int = 9
+    live: bool = False
+
+
+@app.post("/strategy/macd/start")
+def strategy_macd_start(req: MacdStartRequest):
+    global strategy, strategy_active, strategy_live, strategy_exchange, symbol_to_token, token_to_symbol
+    try:
+        broker.kite.profile()
+    except Exception:
+        return {"error": "NOT_AUTHENTICATED"}
+    syms = req.symbols or []
+    if not syms:
+        syms = ai_default_symbols
+    mapping = resolve_tokens_by_symbols(instruments, syms, exchange=req.exchange)
+    if not mapping:
+        return {"error": "SYMBOLS_NOT_FOUND", "symbols": syms}
+    symbol_to_token.update(mapping)
+    token_to_symbol.update({v: k for k, v in mapping.items()})
+    ensure_ticker(mode_full=False)
+    ticker.subscribe(mapping.values())
+    strategy = MacdStrategy(symbols=list(mapping.keys()), fast_period=req.fast_period,
+                           slow_period=req.slow_period, signal_period=req.signal_period)
+    strategy_active = True
+    strategy_live = bool(req.live)
+    strategy_exchange = req.exchange
+    return {"status": "started", "type": "macd", "symbols": list(mapping.keys()), "live": strategy_live}
+
+
+class SupportResistanceStartRequest(BaseModel):
+    symbols: List[str]
+    exchange: str = "NSE"
+    lookback_period: int = 50
+    breakout_threshold: float = 0.01
+    live: bool = False
+
+
+@app.post("/strategy/support_resistance/start")
+def strategy_support_resistance_start(req: SupportResistanceStartRequest):
+    global strategy, strategy_active, strategy_live, strategy_exchange, symbol_to_token, token_to_symbol
+    try:
+        broker.kite.profile()
+    except Exception:
+        return {"error": "NOT_AUTHENTICATED"}
+    syms = req.symbols or []
+    if not syms:
+        syms = ai_default_symbols
+    mapping = resolve_tokens_by_symbols(instruments, syms, exchange=req.exchange)
+    if not mapping:
+        return {"error": "SYMBOLS_NOT_FOUND", "symbols": syms}
+    symbol_to_token.update(mapping)
+    token_to_symbol.update({v: k for k, v in mapping.items()})
+    ensure_ticker(mode_full=False)
+    ticker.subscribe(mapping.values())
+    strategy = SupportResistanceStrategy(symbols=list(mapping.keys()), 
+                                        lookback_period=req.lookback_period,
+                                        breakout_threshold=req.breakout_threshold)
+    strategy_active = True
+    strategy_live = bool(req.live)
+    strategy_exchange = req.exchange
+    return {"status": "started", "type": "support_resistance", "symbols": list(mapping.keys()), "live": strategy_live}
+
+
+class OptionsStraddleStartRequest(BaseModel):
+    symbols: List[str]
+    underlying: str = "NIFTY"
+    expiry: str = "next"
+    quantity: int = 1
+    volatility_threshold: float = 0.02
+    live: bool = False
+
+
+@app.post("/strategy/options_straddle/start")
+def strategy_options_straddle_start(req: OptionsStraddleStartRequest):
+    global strategy, strategy_active, strategy_live, strategy_exchange, symbol_to_token, token_to_symbol
+    try:
+        broker.kite.profile()
+    except Exception:
+        return {"error": "NOT_AUTHENTICATED"}
+    syms = req.symbols or []
+    if not syms:
+        syms = [req.underlying]  # Use underlying as default symbol
+    mapping = resolve_tokens_by_symbols(instruments, syms, exchange="NSE")
+    if not mapping:
+        return {"error": "SYMBOLS_NOT_FOUND", "symbols": syms}
+    symbol_to_token.update(mapping)
+    token_to_symbol.update({v: k for k, v in mapping.items()})
+    ensure_ticker(mode_full=False)
+    ticker.subscribe(mapping.values())
+    strategy = OptionsStraddleStrategy(symbols=list(mapping.keys()), 
+                                      underlying=req.underlying,
+                                      expiry=req.expiry,
+                                      quantity=req.quantity,
+                                      volatility_threshold=req.volatility_threshold)
+    strategy_active = True
+    strategy_live = bool(req.live)
+    strategy_exchange = "NFO"  # Options are traded on NFO
+    return {"status": "started", "type": "options_straddle", "symbols": list(mapping.keys()), "live": strategy_live}
+
+
+class OptionsStrangleStartRequest(BaseModel):
+    symbols: List[str]
+    underlying: str = "NIFTY"
+    expiry: str = "next"
+    quantity: int = 1
+    volatility_threshold: float = 0.02
+    otm_offset: int = 2
+    live: bool = False
+
+
+@app.post("/strategy/options_strangle/start")
+def strategy_options_strangle_start(req: OptionsStrangleStartRequest):
+    global strategy, strategy_active, strategy_live, strategy_exchange, symbol_to_token, token_to_symbol
+    try:
+        broker.kite.profile()
+    except Exception:
+        return {"error": "NOT_AUTHENTICATED"}
+    syms = req.symbols or []
+    if not syms:
+        syms = [req.underlying]  # Use underlying as default symbol
+    mapping = resolve_tokens_by_symbols(instruments, syms, exchange="NSE")
+    if not mapping:
+        return {"error": "SYMBOLS_NOT_FOUND", "symbols": syms}
+    symbol_to_token.update(mapping)
+    token_to_symbol.update({v: k for k, v in mapping.items()})
+    ensure_ticker(mode_full=False)
+    ticker.subscribe(mapping.values())
+    strategy = OptionsStrangleStrategy(symbols=list(mapping.keys()), 
+                                      underlying=req.underlying,
+                                      expiry=req.expiry,
+                                      quantity=req.quantity,
+                                      volatility_threshold=req.volatility_threshold,
+                                      otm_offset=req.otm_offset)
+    strategy_active = True
+    strategy_live = bool(req.live)
+    strategy_exchange = "NFO"  # Options are traded on NFO
+    return {"status": "started", "type": "options_strangle", "symbols": list(mapping.keys()), "live": strategy_live}
+
+
 @app.get("/orders")
 def orders():
     return order_log[-200:]
@@ -829,32 +1065,104 @@ def orders():
 
 @app.get("/pnl")
 def pnl():
-    # Simple realized PnL by pairing BUY then SELL per symbol FIFO
+    # Calculate realized and unrealized PnL
     realized = 0.0
-    holdings: Dict[str, List[dict]] = {}
-    for o in order_log:
-        if o["side"] == "BUY":
-            holdings.setdefault(o["symbol"], []).append(o)
-        elif o["side"] == "SELL":
-            qty = o["quantity"]
-            while qty > 0 and holdings.get(o["symbol"]):
-                buy = holdings[o["symbol"]][0]
-                take = min(qty, buy["quantity"])
-                realized += (o["price"] - buy["price"]) * take
-                buy["quantity"] -= take
-                qty -= take
-                if buy["quantity"] <= 0:
-                    holdings[o["symbol"]].pop(0)
-            # If no buys to match, ignore (shorting not handled here)
-    # Unrealized PnL using current LTP for remaining buys
     unrealized = 0.0
-    for sym, buys in holdings.items():
-        if not buys:
-            continue
-        ltp = _get_ltp_for_symbol(strategy_exchange, sym)
-        for b in buys:
-            unrealized += (ltp - b["price"]) * b["quantity"]
-    return {"realized": round(realized, 2), "unrealized": round(unrealized, 2)}
+    
+    # Separate paper and live trades for better tracking
+    paper_realized = 0.0
+    paper_unrealized = 0.0
+    live_realized = 0.0
+    live_unrealized = 0.0
+    
+    # Process orders by symbol
+    symbol_orders = {}
+    for o in order_log:
+        symbol = o["symbol"]
+        if symbol not in symbol_orders:
+            symbol_orders[symbol] = []
+        symbol_orders[symbol].append(o)
+    
+    # Calculate PnL for each symbol
+    for symbol, orders in symbol_orders.items():
+        # Sort orders by timestamp
+        orders.sort(key=lambda x: x["ts"])
+        
+        # Separate buy and sell orders
+        buy_orders = [o for o in orders if o["side"] == "BUY"]
+        sell_orders = [o for o in orders if o["side"] == "SELL"]
+        
+        # Calculate realized PnL using FIFO
+        remaining_buys = buy_orders.copy()
+        
+        for sell_order in sell_orders:
+            sell_qty = sell_order["quantity"]
+            sell_price = sell_order["price"]
+            is_paper = sell_order.get("dry_run", True)
+            
+            while sell_qty > 0 and remaining_buys:
+                buy_order = remaining_buys[0]
+                buy_qty = buy_order["quantity"]
+                buy_price = buy_order["price"]
+                
+                # Take the minimum of sell quantity and remaining buy quantity
+                trade_qty = min(sell_qty, buy_qty)
+                
+                # Calculate profit/loss for this trade
+                trade_pnl = (sell_price - buy_price) * trade_qty
+                
+                if is_paper:
+                    paper_realized += trade_pnl
+                else:
+                    live_realized += trade_pnl
+                
+                realized += trade_pnl
+                
+                # Update quantities
+                sell_qty -= trade_qty
+                buy_order["quantity"] -= trade_qty
+                
+                # Remove buy order if fully consumed
+                if buy_order["quantity"] <= 0:
+                    remaining_buys.pop(0)
+        
+        # Calculate unrealized PnL for remaining positions
+        for buy_order in remaining_buys:
+            if buy_order["quantity"] > 0:
+                try:
+                    # Get current LTP
+                    exchange = buy_order.get("exchange", strategy_exchange)
+                    ltp = _get_ltp_for_symbol(exchange, symbol)
+                    
+                    if ltp > 0:
+                        unrealized_pnl = (ltp - buy_order["price"]) * buy_order["quantity"]
+                        is_paper = buy_order.get("dry_run", True)
+                        
+                        if is_paper:
+                            paper_unrealized += unrealized_pnl
+                        else:
+                            live_unrealized += unrealized_pnl
+                        
+                        unrealized += unrealized_pnl
+                except Exception:
+                    # If we can't get LTP, skip this position
+                    continue
+    
+    return {
+        "realized": round(realized, 2),
+        "unrealized": round(unrealized, 2),
+        "total": round(realized + unrealized, 2),
+        "paper": {
+            "realized": round(paper_realized, 2),
+            "unrealized": round(paper_unrealized, 2),
+            "total": round(paper_realized + paper_unrealized, 2)
+        },
+        "live": {
+            "realized": round(live_realized, 2),
+            "unrealized": round(live_unrealized, 2),
+            "total": round(live_realized + live_unrealized, 2)
+        }
+    }
 
 
 @app.get("/reports/strategy")
@@ -1329,5 +1637,170 @@ def broker_orders():
     except Exception as e:
         logger.exception("broker orders failed")
         return {"error": str(e)}
+
+
+# AI Trading Endpoints
+class AIStartRequest(BaseModel):
+    live: bool = False
+    capital: float = 100000
+    max_strategies: int = 3
+
+
+@app.post("/ai/start")
+def ai_start_trading(req: AIStartRequest):
+    """Start AI-powered trading"""
+    global ai_active, ai_engine, ai_trade_capital
+    
+    try:
+        broker.kite.profile()  # Validate auth
+    except Exception:
+        return {"error": "NOT_AUTHENTICATED"}
+    
+    if ai_active:
+        return {"error": "AI_TRADING_ALREADY_ACTIVE"}
+    
+    try:
+        ai_trade_capital = req.capital
+        ai_active = True
+        
+        # Initialize AI engine
+        ai_engine = AITradingEngine(
+            broker_client=broker,
+            instruments=instruments,
+            symbol_to_token=symbol_to_token,
+            token_to_symbol=token_to_symbol
+        )
+        
+        # Start AI trading in background
+        import asyncio
+        asyncio.create_task(ai_engine.start_ai_trading(live_mode=req.live))
+        
+        logger.info("AI Trading started with capital: %s, live: %s", req.capital, req.live)
+        return {"status": "started", "capital": req.capital, "live": req.live}
+        
+    except Exception as e:
+        logger.exception("Failed to start AI trading: %s", e)
+        ai_active = False
+        return {"error": str(e)}
+
+
+@app.post("/ai/stop")
+def ai_stop_trading():
+    """Stop AI-powered trading"""
+    global ai_active, ai_engine
+    
+    try:
+        if ai_engine:
+            ai_engine.stop_ai_trading()
+            ai_engine = None
+        
+        ai_active = False
+        logger.info("AI Trading stopped")
+        return {"status": "stopped"}
+        
+    except Exception as e:
+        logger.exception("Failed to stop AI trading: %s", e)
+        return {"error": str(e)}
+
+
+@app.get("/ai/status")
+def ai_status():
+    """Get AI trading status"""
+    try:
+        if not ai_active or not ai_engine:
+            return {
+                "active": False,
+                "capital": ai_trade_capital,
+                "risk_pct": ai_risk_pct,
+                "symbols": ai_default_symbols
+            }
+        
+        status = ai_engine.get_ai_status()
+        status.update({
+            "active": ai_active,
+            "capital": ai_trade_capital,
+            "risk_pct": ai_risk_pct,
+            "symbols": ai_default_symbols
+        })
+        
+        return status
+        
+    except Exception as e:
+        logger.exception("Failed to get AI status: %s", e)
+        return {"error": str(e)}
+
+
+@app.get("/ai/analyze")
+def ai_analyze_market():
+    """Get AI market analysis and strategy recommendations"""
+    try:
+        broker.kite.profile()  # Validate auth
+    except Exception:
+        return {"error": "NOT_AUTHENTICATED"}
+    
+    try:
+        # Simulate market data (in real implementation, get from market feed)
+        price_data = {}
+        volume_data = {}
+        
+        # Get sample data for analysis
+        sample_symbols = ai_default_symbols[:10] if ai_default_symbols else ["RELIANCE", "TCS", "INFY"]
+        
+        for symbol in sample_symbols:
+            try:
+                # Get current price
+                ltp = _get_ltp_for_symbol("NSE", symbol)
+                if ltp > 0:
+                    # Simulate price history
+                    price_data[symbol] = [ltp * (1 + (i - 25) * 0.001) for i in range(50)]
+                    volume_data[symbol] = [1000000 + i * 1000 for i in range(50)]
+            except Exception:
+                continue
+        
+        # Analyze market
+        market_condition = ai_analyzer.analyze_market_condition(price_data, volume_data)
+        
+        # Get recommendations
+        recommendations = ai_analyzer.recommend_strategy(market_condition, ai_trade_capital)
+        
+        return {
+            "market_condition": {
+                "trend": market_condition.trend,
+                "volatility": market_condition.volatility,
+                "volume": market_condition.volume,
+                "momentum": market_condition.momentum,
+                "rsi_level": market_condition.rsi_level,
+                "support_resistance": market_condition.support_resistance
+            },
+            "recommendations": [
+                {
+                    "strategy": rec.strategy_name,
+                    "confidence": round(rec.confidence, 3),
+                    "expected_profit": round(rec.expected_profit, 2),
+                    "risk_level": rec.risk_level,
+                    "symbols": rec.symbols[:5],  # Limit to top 5 symbols
+                    "parameters": rec.parameters
+                }
+                for rec in recommendations
+            ],
+            "analysis_time": datetime.now().isoformat()
+        }
+        
+    except Exception as e:
+        logger.exception("Failed to analyze market: %s", e)
+        return {"error": str(e)}
+
+
+@app.get("/ai/symbols")
+def ai_get_symbols():
+    """Get AI trading universe"""
+    return {
+        "equity_universe": ai_analyzer.equity_universe,
+        "options_universe": ai_analyzer.options_universe,
+        "futures_universe": ai_analyzer.futures_universe,
+        "total_equity_symbols": len(ai_analyzer.equity_universe),
+        "total_options_symbols": len(ai_analyzer.options_universe),
+        "total_futures_symbols": len(ai_analyzer.futures_universe)
+    }
 
 

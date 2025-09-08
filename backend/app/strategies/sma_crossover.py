@@ -46,3 +46,4 @@ class SmaCrossoverStrategy(BaseStrategy):
         return signals
 
 
+
