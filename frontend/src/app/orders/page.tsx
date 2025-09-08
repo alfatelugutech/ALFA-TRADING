@@ -81,6 +81,20 @@ export default function OrdersPage() {
       .reverse();
   }, [orders, side, query]);
 
+  const getLotInfo = (symbol: string, qty: number) => {
+    const u = (symbol || "").toUpperCase();
+    if (!(u.includes("CE") || u.includes("PE"))) return "";
+    let lot = 75;
+    if (u.includes("BANKNIFTY")) lot = 35;
+    else if (u.includes("SENSEX")) lot = 20;
+    else if (u.includes("FINNIFTY")) lot = 40;
+    if (qty % lot === 0) {
+      const lots = Math.round(qty / lot);
+      return ` (${lots} lot${lots>1?"s":""} × ${lot})`;
+    }
+    return ` (contracts)`;
+  };
+
   const exportCsv = () => {
     if (!filtered.length) return;
     const header = ["time","side","symbol","qty","price","mode","source"];
@@ -329,7 +343,7 @@ export default function OrdersPage() {
               <td>{new Date(o.ts).toLocaleString()}</td>
               <td style={{ color: o.side === "BUY" ? "#0a0" : "#a00" }}>{o.side}</td>
               <td>{o.symbol}</td>
-              <td style={{ textAlign: "right" }}>{o.quantity}</td>
+              <td style={{ textAlign: "right" }}>{o.quantity}{getLotInfo(o.symbol, o.quantity)}</td>
               <td style={{ textAlign: "right" }}>{o.price.toFixed(2)}</td>
               <td style={{ textAlign: "center" }}>{o.dry_run ? "PAPER" : "LIVE"}</td>
               <td>{o.source}</td>
