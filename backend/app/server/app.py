@@ -515,9 +515,9 @@ def ltp(symbols: str, exchange: str = "NSE"):
     if not sym_list:
         return {}
     # Require authentication
-    try:
-        broker.kite.profile()
-    except Exception:
+    # Check authentication or demo mode
+    auth_ok, user_id = _check_auth_or_demo()
+    if not auth_ok:
         return {"error": "NOT_AUTHENTICATED"}
     # Prefer latest websocket tick per symbol; fallback to broker LTP API per symbol
     out = {}
@@ -553,9 +553,9 @@ def quote(keys: str):
     """Generic quote endpoint that supports full keys like 'NSE:NIFTY 50'.
     Returns a simple { key: last_price } map.
     """
-    try:
-        broker.kite.profile()
-    except Exception:
+    # Check authentication or demo mode
+    auth_ok, user_id = _check_auth_or_demo()
+    if not auth_ok:
         return {"error": "NOT_AUTHENTICATED"}
     items = [k.strip() for k in (keys or "").split(",") if k.strip()]
     if not items:
@@ -591,9 +591,9 @@ def history(symbol: Optional[str] = None, exchange: str = "NSE", interval: str =
     - interval: minute, 3minute, 5minute, 10minute, 15minute, 30minute, 60minute, day
     - count: number of candles to fetch (approx)
     """
-    try:
-        broker.kite.profile()
-    except Exception:
+    # Check authentication or demo mode
+    auth_ok, user_id = _check_auth_or_demo()
+    if not auth_ok:
         return {"error": "NOT_AUTHENTICATED"}
     try:
         ex = exchange
@@ -912,9 +912,9 @@ class EmaStartRequest(BaseModel):
 @app.post("/strategy/ema/start")
 def strategy_ema_start(req: EmaStartRequest):
     global strategy, strategy_active, strategy_live, strategy_exchange, symbol_to_token, token_to_symbol
-    try:
-        broker.kite.profile()
-    except Exception:
+    # Check authentication or demo mode
+    auth_ok, user_id = _check_auth_or_demo()
+    if not auth_ok:
         return {"error": "NOT_AUTHENTICATED"}
     syms = req.symbols or []
     if not syms:
@@ -945,9 +945,9 @@ class RsiStartRequest(BaseModel):
 @app.post("/strategy/rsi/start")
 def strategy_rsi_start(req: RsiStartRequest):
     global strategy, strategy_active, strategy_live, strategy_exchange, symbol_to_token, token_to_symbol
-    try:
-        broker.kite.profile()
-    except Exception:
+    # Check authentication or demo mode
+    auth_ok, user_id = _check_auth_or_demo()
+    if not auth_ok:
         return {"error": "NOT_AUTHENTICATED"}
     syms = req.symbols or []
     if not syms:
@@ -978,9 +978,9 @@ class BollingerStartRequest(BaseModel):
 @app.post("/strategy/bollinger/start")
 def strategy_bollinger_start(req: BollingerStartRequest):
     global strategy, strategy_active, strategy_live, strategy_exchange, symbol_to_token, token_to_symbol
-    try:
-        broker.kite.profile()
-    except Exception:
+    # Check authentication or demo mode
+    auth_ok, user_id = _check_auth_or_demo()
+    if not auth_ok:
         return {"error": "NOT_AUTHENTICATED"}
     syms = req.symbols or []
     if not syms:
@@ -1012,9 +1012,9 @@ class MacdStartRequest(BaseModel):
 @app.post("/strategy/macd/start")
 def strategy_macd_start(req: MacdStartRequest):
     global strategy, strategy_active, strategy_live, strategy_exchange, symbol_to_token, token_to_symbol
-    try:
-        broker.kite.profile()
-    except Exception:
+    # Check authentication or demo mode
+    auth_ok, user_id = _check_auth_or_demo()
+    if not auth_ok:
         return {"error": "NOT_AUTHENTICATED"}
     syms = req.symbols or []
     if not syms:
@@ -1045,9 +1045,9 @@ class SupportResistanceStartRequest(BaseModel):
 @app.post("/strategy/support_resistance/start")
 def strategy_support_resistance_start(req: SupportResistanceStartRequest):
     global strategy, strategy_active, strategy_live, strategy_exchange, symbol_to_token, token_to_symbol
-    try:
-        broker.kite.profile()
-    except Exception:
+    # Check authentication or demo mode
+    auth_ok, user_id = _check_auth_or_demo()
+    if not auth_ok:
         return {"error": "NOT_AUTHENTICATED"}
     syms = req.symbols or []
     if not syms:
@@ -1080,9 +1080,9 @@ class OptionsStraddleStartRequest(BaseModel):
 @app.post("/strategy/options_straddle/start")
 def strategy_options_straddle_start(req: OptionsStraddleStartRequest):
     global strategy, strategy_active, strategy_live, strategy_exchange, symbol_to_token, token_to_symbol
-    try:
-        broker.kite.profile()
-    except Exception:
+    # Check authentication or demo mode
+    auth_ok, user_id = _check_auth_or_demo()
+    if not auth_ok:
         return {"error": "NOT_AUTHENTICATED"}
     syms = req.symbols or []
     if not syms:
@@ -1118,9 +1118,9 @@ class OptionsStrangleStartRequest(BaseModel):
 @app.post("/strategy/options_strangle/start")
 def strategy_options_strangle_start(req: OptionsStrangleStartRequest):
     global strategy, strategy_active, strategy_live, strategy_exchange, symbol_to_token, token_to_symbol
-    try:
-        broker.kite.profile()
-    except Exception:
+    # Check authentication or demo mode
+    auth_ok, user_id = _check_auth_or_demo()
+    if not auth_ok:
         return {"error": "NOT_AUTHENTICATED"}
     syms = req.symbols or []
     if not syms:
@@ -1737,9 +1737,9 @@ def ai_start_trading(req: AIStartRequest):
     """Start AI-powered trading"""
     global ai_active, ai_engine, ai_trade_capital
     
-    try:
-        broker.kite.profile()  # Validate auth
-    except Exception:
+    # Check authentication or demo mode
+    auth_ok, user_id = _check_auth_or_demo()
+    if not auth_ok:
         return {"error": "NOT_AUTHENTICATED"}
     
     if ai_active:
@@ -1819,9 +1819,9 @@ def ai_status():
 @app.get("/ai/analyze")
 def ai_analyze_market():
     """Get AI market analysis and strategy recommendations"""
-    try:
-        broker.kite.profile()  # Validate auth
-    except Exception:
+    # Check authentication or demo mode
+    auth_ok, user_id = _check_auth_or_demo()
+    if not auth_ok:
         return {"error": "NOT_AUTHENTICATED"}
     
     try:
