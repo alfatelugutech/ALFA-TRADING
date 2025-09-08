@@ -14,7 +14,7 @@ export default function OptionsTrading() {
   const [ce, setCe] = useState<ChainRec[]>([]);
   const [pe, setPe] = useState<ChainRec[]>([]);
   const [selected, setSelected] = useState<Set<string>>(new Set());
-  const [qty, setQty] = useState<number>(1);
+  const [qty, setQty] = useState<number>(1); // lots
   const [offset, setOffset] = useState<number>(0);
   const [selectedRows, setSelectedRows] = useState<string[]>([]);
   const [prices, setPrices] = useState<Record<string, number>>({});
@@ -68,10 +68,19 @@ export default function OptionsTrading() {
     await fetch(backendUrl + "/subscribe", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ symbols: list, exchange: "NFO", mode: "ltp" }) });
   };
 
+  const lotSize = (sym: string) => {
+    const u = sym.toUpperCase();
+    if (u.includes("BANKNIFTY")) return 35;
+    if (u.includes("SENSEX")) return 20;
+    if (u.includes("FINNIFTY")) return 40;
+    return 75; // NIFTY default
+  };
+
   const placeOrders = async (side: "BUY" | "SELL") => {
     const list = Array.from(selected);
     for (const sym of list) {
-      await fetch(backendUrl + "/order", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ symbol: sym, exchange: "NFO", side, quantity: qty }) });
+      const contracts = qty * lotSize(sym);
+      await fetch(backendUrl + "/order", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ symbol: sym, exchange: "NFO", side, quantity: contracts }) });
     }
   };
 
@@ -94,7 +103,10 @@ export default function OptionsTrading() {
         <input type="number" value={count} onChange={(e) => setCount(Number(e.target.value || 10))} style={{ width: 100, padding: 6 }} />
         <button className="btn btn-primary" onClick={loadChain}>Load</button>
         <button className="btn" onClick={refreshLtp}>Refresh LTP</button>
-        <input type="number" value={qty} onChange={(e) => setQty(Number(e.target.value || 1))} style={{ width: 100, padding: 6 }} />
+        <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+          <input type="number" value={qty} onChange={(e) => setQty(Number(e.target.value || 1))} style={{ width: 100, padding: 6 }} />
+          <span style={{ color: "#6c757d" }}>Qty in lots (auto = lots × lot size)</span>
+        </div>
         <button className="btn btn-success" onClick={() => placeOrders("BUY")}>BUY</button>
         <button className="btn btn-danger" onClick={() => placeOrders("SELL")}>SELL</button>
         <button className="btn" onClick={addToWatchlist}>Subscribe</button>

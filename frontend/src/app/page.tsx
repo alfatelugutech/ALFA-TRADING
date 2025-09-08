@@ -2,6 +2,7 @@
 export const dynamic = "force-dynamic";
 
 import { useEffect, useMemo, useRef, useState } from "react";
+import AuthStatus from "./components/AuthStatus";
 import AlertSound from "./components/AlertSound";
 import CandleChart from "./components/CandleChart";
 import IndexMini from "./components/IndexMini";
@@ -308,6 +309,7 @@ export default function Home() {
           Login with Zerodha
         </a>
       </div>
+      <AuthStatus />
       <AlertSound trigger={alertTrigger} />
       <div className="card" style={{ marginBottom: 8 }}>
         <label style={{ fontSize: 12 }}>
