@@ -227,7 +227,6 @@ export default function TradingDashboard() {
           </button>
           <a href="/" style={{ color: "#0969da", textDecoration: "none" }}>Home</a>
         </div>
-      </div>
 
       {/* Status Overview */}
       <div style={{ 
