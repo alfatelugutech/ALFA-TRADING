@@ -65,7 +65,12 @@ class AIMarketAnalyzer:
         
         # Options universe - will be populated dynamically from available instruments
         self.options_universe = []
-        self.futures_universe = ["NIFTY", "BANKNIFTY", "SENSEX", "FINNIFTY"]
+        self.futures_universe = [
+            "NIFTY", "BANKNIFTY", "SENSEX", "FINNIFTY",
+            # Add MCX commodity futures symbols (continuous codes for demo)
+            "GOLD", "SILVER", "CRUDEOIL", "NATURALGAS", "COPPER",
+            "ALUMINIUM", "ZINC", "LEAD", "NICKEL"
+        ]
     
     def update_options_universe(self, available_symbols):
         """Update options universe with actual available symbols"""

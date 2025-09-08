@@ -251,6 +251,17 @@ def _create_demo_instruments() -> list:
         # NFO Options (sample)
         Instrument(instrument_token=256265, exchange="NFO", tradingsymbol="NIFTY2590925200CE", name="NIFTY2590925200CE", instrument_type="CE", segment="NFO", expiry="2025-09-25", strike=20000, tick_size=0.05, lot_size=25, instrument_type_option="CE"),
         Instrument(instrument_token=256266, exchange="NFO", tradingsymbol="NIFTY2590925200PE", name="NIFTY2590925200PE", instrument_type="PE", segment="NFO", expiry="2025-09-25", strike=20000, tick_size=0.05, lot_size=25, instrument_type_option="PE"),
+
+        # MCX Commodities (demo continuous symbols)
+        Instrument(instrument_token=10000001, exchange="MCX", tradingsymbol="GOLD", name="GOLD", instrument_type="FUT", segment="MCX", expiry=None, strike=None, tick_size=1.0, lot_size=1, instrument_type_option=None),
+        Instrument(instrument_token=10000002, exchange="MCX", tradingsymbol="SILVER", name="SILVER", instrument_type="FUT", segment="MCX", expiry=None, strike=None, tick_size=1.0, lot_size=1, instrument_type_option=None),
+        Instrument(instrument_token=10000003, exchange="MCX", tradingsymbol="CRUDEOIL", name="CRUDEOIL", instrument_type="FUT", segment="MCX", expiry=None, strike=None, tick_size=0.05, lot_size=1, instrument_type_option=None),
+        Instrument(instrument_token=10000004, exchange="MCX", tradingsymbol="NATURALGAS", name="NATURALGAS", instrument_type="FUT", segment="MCX", expiry=None, strike=None, tick_size=0.05, lot_size=1, instrument_type_option=None),
+        Instrument(instrument_token=10000005, exchange="MCX", tradingsymbol="COPPER", name="COPPER", instrument_type="FUT", segment="MCX", expiry=None, strike=None, tick_size=0.05, lot_size=1, instrument_type_option=None),
+        Instrument(instrument_token=10000006, exchange="MCX", tradingsymbol="ALUMINIUM", name="ALUMINIUM", instrument_type="FUT", segment="MCX", expiry=None, strike=None, tick_size=0.05, lot_size=1, instrument_type_option=None),
+        Instrument(instrument_token=10000007, exchange="MCX", tradingsymbol="ZINC", name="ZINC", instrument_type="FUT", segment="MCX", expiry=None, strike=None, tick_size=0.05, lot_size=1, instrument_type_option=None),
+        Instrument(instrument_token=10000008, exchange="MCX", tradingsymbol="LEAD", name="LEAD", instrument_type="FUT", segment="MCX", expiry=None, strike=None, tick_size=0.05, lot_size=1, instrument_type_option=None),
+        Instrument(instrument_token=10000009, exchange="MCX", tradingsymbol="NICKEL", name="NICKEL", instrument_type="FUT", segment="MCX", expiry=None, strike=None, tick_size=0.05, lot_size=1, instrument_type_option=None),
     ]
     
     logger.info("Created %d demo instruments for GitHub environment", len(demo_instruments))
@@ -1146,6 +1157,16 @@ def _get_ltp_for_symbol(exchange: str, symbol: str) -> float:
             "NIFTY 50": 20000.0,
             "NIFTY BANK": 45000.0,
             "SENSEX": 75000.0,
+            # MCX Commodities demo
+            "GOLD": 60000.0,
+            "SILVER": 75000.0,
+            "CRUDEOIL": 7200.0,
+            "NATURALGAS": 240.0,
+            "COPPER": 735.0,
+            "ALUMINIUM": 205.0,
+            "ZINC": 225.0,
+            "LEAD": 190.0,
+            "NICKEL": 1650.0,
         }
         return demo_prices.get(symbol, 100.0)
     
@@ -2190,12 +2211,13 @@ class AIStartRequest(BaseModel):
     live: bool = False
     capital: float = 100000
     max_strategies: int = 3
+    risk_pct: float | None = None
 
 
 @app.post("/ai/start")
 def ai_start_trading(req: AIStartRequest, background_tasks: BackgroundTasks):
     """Start AI-powered trading"""
-    global ai_active, ai_engine, ai_trade_capital
+    global ai_active, ai_engine, ai_trade_capital, ai_risk_pct
     
     # Check authentication or demo mode
     auth_ok, user_id = _check_auth_or_demo()
@@ -2207,6 +2229,19 @@ def ai_start_trading(req: AIStartRequest, background_tasks: BackgroundTasks):
     
     try:
         ai_trade_capital = req.capital
+        # If risk provided in request, update; else use existing configured value
+        used_risk_pct = ai_risk_pct
+        try:
+            incoming_risk = getattr(req, "risk_pct", None)
+        except Exception:
+            incoming_risk = None
+        if incoming_risk is not None:
+            try:
+                ai_risk_pct = float(incoming_risk)
+                used_risk_pct = ai_risk_pct
+            except Exception:
+                # Ignore parsing errors and keep existing value
+                used_risk_pct = ai_risk_pct
         ai_active = True
         
         # Enable automatic risk management with trailing stops
@@ -2215,8 +2250,8 @@ def ai_start_trading(req: AIStartRequest, background_tasks: BackgroundTasks):
         trailing_stop_pct = 0.02  # 2% trailing stop
         trailing_stop_points = 10  # 10 points trailing stop
         
-        logger.info("AI Trading started with capital: ₹%d, risk: %.2f%%, trailing stops enabled", 
-                    req.capital, req.risk_pct * 100)
+        logger.info("AI Trading started with capital: ₹%d, risk: %.2f%%, trailing stops enabled",
+                    req.capital, used_risk_pct * 100)
         
         # Resolve and subscribe to default AI symbols so the AI gets live ticks
         try:
