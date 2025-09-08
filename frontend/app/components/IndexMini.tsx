@@ -15,7 +15,9 @@ export default function IndexMini({ title, kiteKey }: { title: string; kiteKey: 
     const load = async () => {
       try {
         // Try candles first to support timeframe
-        const url = new URL(`${backendUrl}/history`);
+        const base = backendUrl || (typeof window !== "undefined" ? window.location.origin : "");
+        if (!base) return;
+        const url = new URL(`${base}/history`);
         url.searchParams.set("key", kiteKey);
         url.searchParams.set("interval", interval);
         url.searchParams.set("count", "60");
@@ -29,7 +31,7 @@ export default function IndexMini({ title, kiteKey }: { title: string; kiteKey: 
           return;
         }
         // Fallback to quote for last price when no candles (off-market)
-        const r = await fetch(`${backendUrl}/quote?keys=${encodeURIComponent(kiteKey)}`);
+        const r = await fetch(`${base}/quote?keys=${encodeURIComponent(kiteKey)}`);
         const qd = await r.json();
         if (qd?.error) { if (!stopped) setErr(String(qd.error)); return; }
         const last = Number((qd || {})[kiteKey] || 0);

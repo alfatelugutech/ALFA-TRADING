@@ -12,7 +12,10 @@ export default function CandleChart({ symbol, exchange = "NSE" }: { symbol: stri
 
   const load = async () => {
     if (!symbol) return;
-    const url = new URL(`${backendUrl}/history`);
+    // Ensure a valid absolute URL even if NEXT_PUBLIC_BACKEND_URL is not set
+    const base = backendUrl || (typeof window !== "undefined" ? window.location.origin : "");
+    if (!base) return; // cannot construct a valid URL in non-browser env
+    const url = new URL(`${base}/history`);
     url.searchParams.set("symbol", symbol);
     url.searchParams.set("exchange", exchange);
     url.searchParams.set("interval", interval);
