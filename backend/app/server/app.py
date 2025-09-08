@@ -102,8 +102,62 @@ def _load_or_download_instruments() -> list:
             logger.info("Instruments downloaded: %s entries", len(data))
             return load_instruments(str(csv_path))
         except Exception:
-            logger.exception("Failed to download instruments. Continuing with empty list.")
-            return []
+            logger.exception("Failed to download instruments. Using demo instruments for GitHub environment.")
+            return _create_demo_instruments()
+
+
+def _check_auth_or_demo():
+    """Check authentication or return demo mode status"""
+    if cfg.zerodha_api_key == "demo_key":
+        return True, "DEMO_USER"
+    try:
+        prof = broker.kite.profile()
+        return True, prof.get("user_id")
+    except Exception:
+        return False, None
+
+
+def _create_demo_instruments() -> list:
+    """Create demo instruments for GitHub/demo environment"""
+    from app.utils.symbols import Instrument
+    
+    demo_instruments = [
+        # NSE Equity
+        Instrument(instrument_token=738561, exchange="NSE", tradingsymbol="RELIANCE", name="RELIANCE", instrument_type="EQ", segment="NSE", expiry=None, strike=None, tick_size=0.05, lot_size=1, instrument_type_option=None),
+        Instrument(instrument_token=408065, exchange="NSE", tradingsymbol="TCS", name="TCS", instrument_type="EQ", segment="NSE", expiry=None, strike=None, tick_size=0.05, lot_size=1, instrument_type_option=None),
+        Instrument(instrument_token=408065, exchange="NSE", tradingsymbol="INFY", name="INFY", instrument_type="EQ", segment="NSE", expiry=None, strike=None, tick_size=0.05, lot_size=1, instrument_type_option=None),
+        Instrument(instrument_token=341249, exchange="NSE", tradingsymbol="HDFCBANK", name="HDFCBANK", instrument_type="EQ", segment="NSE", expiry=None, strike=None, tick_size=0.05, lot_size=1, instrument_type_option=None),
+        Instrument(instrument_token=1270529, exchange="NSE", tradingsymbol="ICICIBANK", name="ICICIBANK", instrument_type="EQ", segment="NSE", expiry=None, strike=None, tick_size=0.05, lot_size=1, instrument_type_option=None),
+        Instrument(instrument_token=492033, exchange="NSE", tradingsymbol="KOTAKBANK", name="KOTAKBANK", instrument_type="EQ", segment="NSE", expiry=None, strike=None, tick_size=0.05, lot_size=1, instrument_type_option=None),
+        Instrument(instrument_token=356865, exchange="NSE", tradingsymbol="HINDUNILVR", name="HINDUNILVR", instrument_type="EQ", segment="NSE", expiry=None, strike=None, tick_size=0.05, lot_size=1, instrument_type_option=None),
+        Instrument(instrument_token=424961, exchange="NSE", tradingsymbol="ITC", name="ITC", instrument_type="EQ", segment="NSE", expiry=None, strike=None, tick_size=0.05, lot_size=1, instrument_type_option=None),
+        Instrument(instrument_token=2714625, exchange="NSE", tradingsymbol="BHARTIARTL", name="BHARTIARTL", instrument_type="EQ", segment="NSE", expiry=None, strike=None, tick_size=0.05, lot_size=1, instrument_type_option=None),
+        Instrument(instrument_token=779521, exchange="NSE", tradingsymbol="SBIN", name="SBIN", instrument_type="EQ", segment="NSE", expiry=None, strike=None, tick_size=0.05, lot_size=1, instrument_type_option=None),
+        Instrument(instrument_token=2939649, exchange="NSE", tradingsymbol="LT", name="LT", instrument_type="EQ", segment="NSE", expiry=None, strike=None, tick_size=0.05, lot_size=1, instrument_type_option=None),
+        Instrument(instrument_token=60417, exchange="NSE", tradingsymbol="ASIANPAINT", name="ASIANPAINT", instrument_type="EQ", segment="NSE", expiry=None, strike=None, tick_size=0.05, lot_size=1, instrument_type_option=None),
+        Instrument(instrument_token=2815745, exchange="NSE", tradingsymbol="MARUTI", name="MARUTI", instrument_type="EQ", segment="NSE", expiry=None, strike=None, tick_size=0.05, lot_size=1, instrument_type_option=None),
+        Instrument(instrument_token=1510401, exchange="NSE", tradingsymbol="AXISBANK", name="AXISBANK", instrument_type="EQ", segment="NSE", expiry=None, strike=None, tick_size=0.05, lot_size=1, instrument_type_option=None),
+        Instrument(instrument_token=4598529, exchange="NSE", tradingsymbol="NESTLEIND", name="NESTLEIND", instrument_type="EQ", segment="NSE", expiry=None, strike=None, tick_size=0.05, lot_size=1, instrument_type_option=None),
+        Instrument(instrument_token=2952193, exchange="NSE", tradingsymbol="ULTRACEMCO", name="ULTRACEMCO", instrument_type="EQ", segment="NSE", expiry=None, strike=None, tick_size=0.05, lot_size=1, instrument_type_option=None),
+        Instrument(instrument_token=857857, exchange="NSE", tradingsymbol="SUNPHARMA", name="SUNPHARMA", instrument_type="EQ", segment="NSE", expiry=None, strike=None, tick_size=0.05, lot_size=1, instrument_type_option=None),
+        Instrument(instrument_token=897537, exchange="NSE", tradingsymbol="TITAN", name="TITAN", instrument_type="EQ", segment="NSE", expiry=None, strike=None, tick_size=0.05, lot_size=1, instrument_type_option=None),
+        Instrument(instrument_token=3834113, exchange="NSE", tradingsymbol="POWERGRID", name="POWERGRID", instrument_type="EQ", segment="NSE", expiry=None, strike=None, tick_size=0.05, lot_size=1, instrument_type_option=None),
+        Instrument(instrument_token=2977281, exchange="NSE", tradingsymbol="NTPC", name="NTPC", instrument_type="EQ", segment="NSE", expiry=None, strike=None, tick_size=0.05, lot_size=1, instrument_type_option=None),
+        
+        # NSE Indices
+        Instrument(instrument_token=256265, exchange="NSE", tradingsymbol="NIFTY 50", name="NIFTY 50", instrument_type="INDEX", segment="NSE", expiry=None, strike=None, tick_size=0.05, lot_size=1, instrument_type_option=None),
+        Instrument(instrument_token=260105, exchange="NSE", tradingsymbol="NIFTY BANK", name="NIFTY BANK", instrument_type="INDEX", segment="NSE", expiry=None, strike=None, tick_size=0.05, lot_size=1, instrument_type_option=None),
+        
+        # BSE Indices
+        Instrument(instrument_token=2650241, exchange="BSE", tradingsymbol="SENSEX", name="SENSEX", instrument_type="INDEX", segment="BSE", expiry=None, strike=None, tick_size=0.05, lot_size=1, instrument_type_option=None),
+        
+        # NFO Options (sample)
+        Instrument(instrument_token=256265, exchange="NFO", tradingsymbol="NIFTY2590925200CE", name="NIFTY2590925200CE", instrument_type="CE", segment="NFO", expiry="2025-09-25", strike=20000, tick_size=0.05, lot_size=25, instrument_type_option="CE"),
+        Instrument(instrument_token=256266, exchange="NFO", tradingsymbol="NIFTY2590925200PE", name="NIFTY2590925200PE", instrument_type="PE", segment="NFO", expiry="2025-09-25", strike=20000, tick_size=0.05, lot_size=25, instrument_type_option="PE"),
+    ]
+    
+    logger.info("Created %d demo instruments for GitHub environment", len(demo_instruments))
+    return demo_instruments
 
 
 instruments = _load_or_download_instruments()
@@ -415,6 +469,9 @@ def status():
         prof = broker.kite.profile()
         return {"auth": True, "user_id": prof.get("user_id"), "dry_run": cfg.dry_run}
     except Exception:
+        # For GitHub/demo environment, return mock auth status
+        if cfg.zerodha_api_key == "demo_key":
+            return {"auth": True, "user_id": "DEMO_USER", "dry_run": True, "demo_mode": True}
         return {"auth": False, "dry_run": cfg.dry_run}
 
 
@@ -619,7 +676,37 @@ def _get_ltp_for_symbol(exchange: str, symbol: str) -> float:
                 return price_tick
     except Exception:
         pass
-    # 2) Fallback to broker LTP API
+    
+    # 2) Demo mode - return mock prices
+    if cfg.zerodha_api_key == "demo_key":
+        demo_prices = {
+            "RELIANCE": 1375.0,
+            "TCS": 3046.8,
+            "INFY": 1445.5,
+            "HDFCBANK": 1650.0,
+            "ICICIBANK": 950.0,
+            "KOTAKBANK": 1750.0,
+            "HINDUNILVR": 2450.0,
+            "ITC": 450.0,
+            "BHARTIARTL": 1200.0,
+            "SBIN": 650.0,
+            "LT": 3200.0,
+            "ASIANPAINT": 2800.0,
+            "MARUTI": 8500.0,
+            "AXISBANK": 1100.0,
+            "NESTLEIND": 18000.0,
+            "ULTRACEMCO": 8500.0,
+            "SUNPHARMA": 1200.0,
+            "TITAN": 3200.0,
+            "POWERGRID": 250.0,
+            "NTPC": 180.0,
+            "NIFTY 50": 20000.0,
+            "NIFTY BANK": 45000.0,
+            "SENSEX": 75000.0,
+        }
+        return demo_prices.get(symbol, 100.0)
+    
+    # 3) Fallback to broker LTP API
     try:
         data = broker.get_ltp({f"{exchange}:{symbol}": symbol})
         rec = data.get(f"{exchange}:{symbol}") or {}
@@ -773,10 +860,9 @@ class SmaStartRequest(BaseModel):
 @app.post("/strategy/sma/start")
 def strategy_sma_start(req: SmaStartRequest):
     global strategy, strategy_active, strategy_live, strategy_exchange, symbol_to_token, token_to_symbol
-    # Validate auth
-    try:
-        broker.kite.profile()
-    except Exception:
+    # Check authentication or demo mode
+    auth_ok, user_id = _check_auth_or_demo()
+    if not auth_ok:
         return {"error": "NOT_AUTHENTICATED"}
     # Resolve symbols and subscribe
     syms = req.symbols or []
