@@ -77,6 +77,23 @@ class ZerodhaClient:
     def instruments(self, exchange: Optional[str] = None):
         return self._kite.instruments(exchange)
 
+    # Funds / Margins
+    def funds(self) -> Dict[str, Any]:
+        """Return available cash and other balances from broker.
+        Falls back to empty dict if API not available."""
+        try:
+            # kiteconnect uses .margins(segment) where segment is 'equity' or 'commodity'
+            eq = self._kite.margins("equity")
+            co = {}
+            try:
+                co = self._kite.margins("commodity")
+            except Exception:
+                co = {}
+            return {"equity": eq, "commodity": co}
+        except Exception:
+            logger.exception("fetch funds failed")
+            return {}
+
     def place_paper_order(
         self,
         symbol: str,

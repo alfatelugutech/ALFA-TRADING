@@ -2080,6 +2080,7 @@ def status_all():
             "starting_cash": round(float(paper_account.get("starting_cash", 0.0)), 2),
             "risk_per_trade_pct": paper_risk_per_trade_pct,
         },
+        "funds": _safe_funds(),
         "strategy": {
             "active": strategy_active,
             "live": strategy_live,
@@ -2092,6 +2093,22 @@ def status_all():
         },
         "schedule": {"config": schedule_cfg, "state": _schedule_state},
     }
+
+
+def _safe_funds() -> dict:
+    try:
+        if cfg.zerodha_api_key == "demo_key":
+            # Demo placeholder
+            return {"equity": {"available": {"cash": 0, "live_balance": 0}}, "commodity": {}}
+        f = broker.funds() or {}
+        return f
+    except Exception:
+        logger.exception("funds fetch failed")
+        return {}
+
+@app.get("/funds")
+def get_funds():
+    return _safe_funds()
 
 
 class DryRunRequest(BaseModel):
