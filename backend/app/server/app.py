@@ -29,6 +29,9 @@ from app.strategies.options_straddle import OptionsStraddleStrategy
 from app.strategies.options_strangle import OptionsStrangleStrategy
 from app.ai.market_analyzer import AIMarketAnalyzer
 from app.ai.trading_engine import AITradingEngine
+from app.risk.portfolio_manager import AdvancedPortfolioManager, RiskLevel
+from app.alerts.notification_system import AdvancedAlertManager, Alert, AlertType, AlertPriority, NotificationChannel, NotificationService
+from app.backtesting.engine import BacktestEngine, OrderSide, OrderType
 from app.utils.symbols import load_instruments, resolve_tokens_by_symbols, search_symbols
 
 
@@ -293,6 +296,16 @@ ai_options_qty: int = int(os.getenv("AI_OPTIONS_QTY", "1") or 1)
 # AI Trading Engine
 ai_engine: Optional[AITradingEngine] = None
 ai_analyzer = AIMarketAnalyzer()
+
+# Advanced Features
+portfolio_manager = AdvancedPortfolioManager(initial_capital=100000)
+notification_service = NotificationService({
+    "email": {"enabled": False},  # Configure email settings
+    "sms": {"enabled": False},    # Configure SMS settings
+    "webhook": {"enabled": False} # Configure webhook settings
+})
+alert_manager = AdvancedAlertManager(notification_service)
+backtest_engine = BacktestEngine(initial_capital=100000)
 
 # Trailing stop
 trailing_stop_pct: float = float(os.getenv("TRAILING_STOP_PCT", "0.0") or 0.0)  # 0.02 => 2%
@@ -684,6 +697,173 @@ def auth_clear_cache():
     auth_cache["access_token"] = None
     logger.info("Authentication cache cleared")
     return {"status": "Cache cleared", "message": "Next request will require re-authentication"}
+
+
+# Advanced Portfolio Management Endpoints
+@app.get("/portfolio/advanced")
+def get_advanced_portfolio():
+    """Get advanced portfolio analysis"""
+    try:
+        summary = portfolio_manager.get_portfolio_summary()
+        return summary
+    except Exception as e:
+        logger.exception("Error getting advanced portfolio: %s", e)
+        return {"error": str(e)}
+
+
+@app.post("/portfolio/position")
+def add_portfolio_position(symbol: str, quantity: int, price: float, exchange: str = "NSE"):
+    """Add a position to the portfolio"""
+    try:
+        success = portfolio_manager.add_position(symbol, quantity, price, exchange)
+        if success:
+            return {"status": "success", "message": f"Position added: {symbol}"}
+        else:
+            return {"status": "error", "message": "Failed to add position - risk limits exceeded"}
+    except Exception as e:
+        logger.exception("Error adding position: %s", e)
+        return {"error": str(e)}
+
+
+@app.get("/portfolio/risk")
+def get_portfolio_risk():
+    """Get portfolio risk metrics"""
+    try:
+        metrics = portfolio_manager.get_risk_metrics()
+        violations = portfolio_manager.check_risk_limits()
+        risk_level = portfolio_manager.get_risk_level()
+        
+        return {
+            "risk_metrics": {
+                "total_exposure": metrics.total_exposure,
+                "portfolio_value": metrics.portfolio_value,
+                "leverage_ratio": metrics.leverage_ratio,
+                "var_95": metrics.var_95,
+                "max_drawdown": metrics.max_drawdown,
+                "sharpe_ratio": metrics.sharpe_ratio,
+                "concentration_risk": metrics.concentration_risk
+            },
+            "risk_violations": violations,
+            "risk_level": risk_level.value
+        }
+    except Exception as e:
+        logger.exception("Error getting portfolio risk: %s", e)
+        return {"error": str(e)}
+
+
+# Advanced Alerts Endpoints
+@app.post("/alerts/create")
+def create_alert(alert_data: dict):
+    """Create a new alert"""
+    try:
+        alert = Alert(
+            id=alert_data.get("id", f"alert_{int(time.time())}"),
+            symbol=alert_data["symbol"],
+            alert_type=AlertType(alert_data["alert_type"]),
+            condition=alert_data["condition"],
+            priority=AlertPriority(alert_data.get("priority", "medium")),
+            channels=[NotificationChannel(ch) for ch in alert_data.get("channels", ["dashboard"])],
+            enabled=alert_data.get("enabled", True),
+            cooldown_minutes=alert_data.get("cooldown_minutes", 15),
+            user_id=alert_data.get("user_id")
+        )
+        
+        success = alert_manager.add_alert(alert)
+        if success:
+            return {"status": "success", "message": f"Alert created: {alert.id}"}
+        else:
+            return {"status": "error", "message": "Failed to create alert"}
+    except Exception as e:
+        logger.exception("Error creating alert: %s", e)
+        return {"error": str(e)}
+
+
+@app.get("/alerts")
+def get_alerts(user_id: Optional[str] = None):
+    """Get all alerts"""
+    try:
+        alerts = alert_manager.get_alerts(user_id)
+        return {"alerts": [alert.__dict__ for alert in alerts]}
+    except Exception as e:
+        logger.exception("Error getting alerts: %s", e)
+        return {"error": str(e)}
+
+
+@app.get("/alerts/history")
+def get_alert_history(limit: int = 100):
+    """Get alert trigger history"""
+    try:
+        history = alert_manager.get_trigger_history(limit)
+        return {"history": [trigger.__dict__ for trigger in history]}
+    except Exception as e:
+        logger.exception("Error getting alert history: %s", e)
+        return {"error": str(e)}
+
+
+# Backtesting Endpoints
+@app.post("/backtest/load-data")
+def load_backtest_data(symbol: str, data: List[dict]):
+    """Load historical data for backtesting"""
+    try:
+        import pandas as pd
+        df = pd.DataFrame(data)
+        success = backtest_engine.load_historical_data(symbol, df)
+        if success:
+            return {"status": "success", "message": f"Data loaded for {symbol}"}
+        else:
+            return {"status": "error", "message": "Failed to load data"}
+    except Exception as e:
+        logger.exception("Error loading backtest data: %s", e)
+        return {"error": str(e)}
+
+
+@app.post("/backtest/run")
+def run_backtest(strategy_config: dict):
+    """Run a backtest"""
+    try:
+        start_date = datetime.fromisoformat(strategy_config["start_date"])
+        end_date = datetime.fromisoformat(strategy_config["end_date"])
+        
+        # Simple strategy function for demo
+        def demo_strategy(timestamp, price_data, engine):
+            # This is a placeholder - implement your strategy logic here
+            pass
+        
+        result = backtest_engine.run_backtest(demo_strategy, start_date, end_date)
+        
+        return {
+            "status": "success",
+            "result": {
+                "start_date": result.start_date.isoformat(),
+                "end_date": result.end_date.isoformat(),
+                "initial_capital": result.initial_capital,
+                "final_capital": result.final_capital,
+                "total_return": result.metrics.total_return,
+                "annualized_return": result.metrics.annualized_return,
+                "sharpe_ratio": result.metrics.sharpe_ratio,
+                "max_drawdown": result.metrics.max_drawdown,
+                "win_rate": result.metrics.win_rate,
+                "total_trades": result.metrics.total_trades
+            }
+        }
+    except Exception as e:
+        logger.exception("Error running backtest: %s", e)
+        return {"error": str(e)}
+
+
+# WebSocket for real-time notifications
+@app.websocket("/ws/notifications")
+async def websocket_notifications(websocket: WebSocket):
+    """WebSocket endpoint for real-time notifications"""
+    await websocket.accept()
+    notification_service.add_websocket_client(websocket)
+    
+    try:
+        while True:
+            # Keep connection alive
+            await websocket.receive_text()
+    except WebSocketDisconnect:
+        notification_service.remove_websocket_client(websocket)
 
 
 @app.get("/status")
