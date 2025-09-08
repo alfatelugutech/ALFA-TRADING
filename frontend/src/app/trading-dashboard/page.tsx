@@ -54,6 +54,7 @@ export default function TradingDashboard() {
       // Load AI status
       const aiResp = await fetch(`${backendUrl}/ai/status`);
       const aiData = await aiResp.json();
+      console.log("AI Status from backend:", aiData);
       setAiStatus(aiData);
 
       // Load PnL
@@ -155,7 +156,7 @@ export default function TradingDashboard() {
 
   const startAITrading = async () => {
     try {
-      await fetch(`${backendUrl}/ai/start`, {
+      const response = await fetch(`${backendUrl}/ai/start`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -164,19 +165,46 @@ export default function TradingDashboard() {
           max_strategies: 3
         }),
       });
-      await loadData();
+      
+      const result = await response.json();
+      
+      if (result.error) {
+        alert(`Error starting AI trading: ${result.error}`);
+        return;
+      }
+      
       alert("AI Trading started successfully!");
+      
+      // Wait a moment for the backend to process, then refresh
+      setTimeout(async () => {
+        await loadData();
+      }, 1000);
+      
     } catch (error) {
+      console.error("Failed to start AI trading:", error);
       alert("Failed to start AI trading");
     }
   };
 
   const stopAITrading = async () => {
     try {
-      await fetch(`${backendUrl}/ai/stop`, { method: "POST" });
-      await loadData();
+      const response = await fetch(`${backendUrl}/ai/stop`, { method: "POST" });
+      const result = await response.json();
+      
+      if (result.error) {
+        alert(`Error stopping AI trading: ${result.error}`);
+        return;
+      }
+      
       alert("AI Trading stopped successfully!");
+      
+      // Wait a moment for the backend to process, then refresh
+      setTimeout(async () => {
+        await loadData();
+      }, 1000);
+      
     } catch (error) {
+      console.error("Failed to stop AI trading:", error);
       alert("Failed to stop AI trading");
     }
   };
@@ -416,6 +444,9 @@ export default function TradingDashboard() {
               <div>Capital: ₹{aiStatus.capital?.toLocaleString()}</div>
               <div>Risk: {aiStatus.risk_pct}%</div>
               <div>Active Strategies: {aiStatus.active_strategies?.length || 0}</div>
+              <div style={{ fontSize: "0.8em", color: "#999", marginTop: 4 }}>
+                Debug: active={String(aiStatus.active)}
+              </div>
             </div>
           )}
         </div>
@@ -496,7 +527,7 @@ export default function TradingDashboard() {
           textAlign: "center",
           fontWeight: "bold"
         }}>
-          🤖 AI Trading
+             AI Trading
         </a>
         <a href="/orders" style={{ 
           padding: 16, 
