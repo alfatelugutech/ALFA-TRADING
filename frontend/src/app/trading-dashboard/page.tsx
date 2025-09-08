@@ -317,90 +317,7 @@ export default function TradingDashboard() {
         </div>
       </div>
 
-      {/* Strategy Controls */}
-      <div style={{ 
-        display: "grid", 
-        gridTemplateColumns: "1fr 1fr", 
-        gap: 20, 
-        marginBottom: 20 
-      }}>
-        {/* Manual Strategy Controls */}
-        <div style={{ 
-          padding: 20, 
-          backgroundColor: "#ffffff", 
-          borderRadius: 8, 
-          border: "1px solid #e9ecef" 
-        }}>
-          <h3 style={{ margin: "0 0 16px 0" }}>📈 Manual Strategy Controls</h3>
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginBottom: 16 }}>
-            <button 
-              onClick={startSMAStrategy}
-              disabled={strategyStatus?.active}
-              style={{ 
-                padding: "12px 16px", 
-                backgroundColor: strategyStatus?.active ? "#6c757d" : "#007bff",
-                color: "white",
-                border: "none",
-                borderRadius: 4,
-                cursor: strategyStatus?.active ? "not-allowed" : "pointer"
-              }}
-            >
-              Start SMA Strategy
-            </button>
-            <button 
-              onClick={startEMAStrategy}
-              disabled={strategyStatus?.active}
-              style={{ 
-                padding: "12px 16px", 
-                backgroundColor: strategyStatus?.active ? "#6c757d" : "#28a745",
-                color: "white",
-                border: "none",
-                borderRadius: 4,
-                cursor: strategyStatus?.active ? "not-allowed" : "pointer"
-              }}
-            >
-              Start EMA Strategy
-            </button>
-            <button 
-              onClick={startRSIStrategy}
-              disabled={strategyStatus?.active}
-              style={{ 
-                padding: "12px 16px", 
-                backgroundColor: strategyStatus?.active ? "#6c757d" : "#ffc107",
-                color: "white",
-                border: "none",
-                borderRadius: 4,
-                cursor: strategyStatus?.active ? "not-allowed" : "pointer"
-              }}
-            >
-              Start RSI Strategy
-            </button>
-            <button 
-              onClick={stopStrategy}
-              disabled={!strategyStatus?.active}
-              style={{ 
-                padding: "12px 16px", 
-                backgroundColor: !strategyStatus?.active ? "#6c757d" : "#dc3545",
-                color: "white",
-                border: "none",
-                borderRadius: 4,
-                cursor: !strategyStatus?.active ? "not-allowed" : "pointer"
-              }}
-            >
-              Stop Strategy
-            </button>
-          </div>
-          {strategyStatus && (
-            <div style={{ fontSize: "0.9em", color: "#6c757d" }}>
-              <div>Status: {strategyStatus.active ? "Active" : "Inactive"}</div>
-              <div>Mode: {strategyStatus.live ? "Live Trading" : "Paper Trading"}</div>
-              <div>Exchange: {strategyStatus.exchange}</div>
-              <div>Last Signals: {strategyStatus.last_signals?.length || 0}</div>
-            </div>
-          )}
-        </div>
-
-        {/* AI Trading Controls */}
+      {/* AI Trading Controls only (manual controls removed) */}
         <div style={{ 
           padding: 20, 
           backgroundColor: "#ffffff", 
@@ -500,24 +417,13 @@ export default function TradingDashboard() {
         )}
       </div>
 
-      {/* Quick Links */}
+      {/* Quick Links - AI focused */}
       <div style={{ 
         display: "grid", 
-        gridTemplateColumns: "repeat(4, 1fr)", 
+        gridTemplateColumns: "repeat(3, 1fr)", 
         gap: 12, 
         marginTop: 20 
       }}>
-        <a href="/strategy-builder" style={{ 
-          padding: 16, 
-          backgroundColor: "#007bff", 
-          color: "white", 
-          textDecoration: "none", 
-          borderRadius: 8, 
-          textAlign: "center",
-          fontWeight: "bold"
-        }}>
-          📈 Strategy Builder
-        </a>
         <a href="/ai-trading" style={{ 
           padding: 16, 
           backgroundColor: "#6f42c1", 
