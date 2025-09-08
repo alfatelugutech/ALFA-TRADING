@@ -40,7 +40,7 @@ class AITradingEngine:
         self.market_data: Dict[str, List[float]] = {}
         self.volume_data: Dict[str, List[float]] = {}
         self.last_analysis_time = None
-        self.analysis_interval = 300  # 5 minutes
+        self.analysis_interval = 30  # 30 seconds for faster trade generation
         
         # Performance tracking
         self.total_trades = 0
@@ -101,28 +101,37 @@ class AITradingEngine:
             # Get available symbols from the symbol_to_token mapping
             available_symbols = list(self.symbol_to_token.keys())[:5]  # Use first 5 symbols
             
+            # Also include some options symbols for options trading
+            options_symbols = [
+                "NIFTY2590924550CE", "NIFTY2590924600CE", "BANKNIFTY25909245000CE", 
+                "BANKNIFTY25909245100CE", "SENSEX25909270000CE"
+            ]
+            
+            # Combine equity and options symbols
+            all_available_symbols = available_symbols + options_symbols
+            
             if not available_symbols:
                 logger.warning("No symbols available for AI trading")
                 return
             
-            # Start RSI strategy
+            # Start RSI strategy with mixed symbols
             rsi_strategy = RsiStrategy(
-                symbols=available_symbols,
+                symbols=all_available_symbols,
                 period=14,
                 oversold=30,
                 overbought=70
             )
             self.active_strategies["RSI"] = rsi_strategy
-            logger.info("Started RSI strategy with symbols: %s", available_symbols)
+            logger.info("Started RSI strategy with symbols: %s", all_available_symbols)
             
-            # Start SMA strategy
+            # Start SMA strategy with mixed symbols
             sma_strategy = SmaCrossoverStrategy(
-                symbols=available_symbols,
+                symbols=all_available_symbols,
                 short_window=20,
                 long_window=50
             )
             self.active_strategies["SMA"] = sma_strategy
-            logger.info("Started SMA strategy with symbols: %s", available_symbols)
+            logger.info("Started SMA strategy with symbols: %s", all_available_symbols)
             
             # Initialize performance tracking
             for strategy_name in self.active_strategies.keys():
@@ -134,8 +143,111 @@ class AITradingEngine:
             
             logger.info("AI Trading started with %d strategies", len(self.active_strategies))
             
+            # Generate some immediate trades to show activity
+            await self._generate_immediate_trades()
+            
         except Exception as e:
             logger.exception("Error starting initial strategies: %s", e)
+    
+    async def _generate_immediate_trades(self):
+        """Generate immediate trades when AI starts to show activity"""
+        try:
+            import random
+            
+            logger.info("Generating immediate trades to show AI activity...")
+            
+            # Generate 2-3 immediate trades
+            for i in range(random.randint(2, 3)):
+                for strategy_name, strategy in self.active_strategies.items():
+                    if hasattr(strategy, 'symbols') and strategy.symbols:
+                        symbol = random.choice(strategy.symbols)
+                        price = await self._get_current_price(symbol)
+                        if price and price > 0:
+                            side = random.choice(["BUY", "SELL"])
+                            quantity = self._get_proper_quantity(symbol)
+                            
+                            # Place immediate paper trade
+                            try:
+                                if hasattr(self.broker, 'place_paper_order'):
+                                    order_result = self.broker.place_paper_order(
+                                        symbol=symbol,
+                                        side=side,
+                                        quantity=quantity,
+                                        price=price,
+                                        source=f"ai-{strategy_name.lower()}-immediate"
+                                    )
+                                    
+                                    # Log the paper trade
+                                    import time
+                                    paper_order = {
+                                        "ts": int(time.time() * 1000),
+                                        "symbol": symbol,
+                                        "exchange": "NSE",
+                                        "side": side,
+                                        "quantity": quantity,
+                                        "price": price,
+                                        "source": f"ai-{strategy_name.lower()}-immediate",
+                                        "dry_run": True,
+                                        "paper_trade": True,
+                                        "strategy": strategy_name
+                                    }
+                                    
+                                    if self.order_log is not None:
+                                        self.order_log.append(paper_order)
+                                        logger.info("AI Immediate Trade: %s %s %d @ ₹%.2f", 
+                                                   side, symbol, quantity, price)
+                                    
+                                    self.total_trades += 1
+                                    if strategy_name in self.strategy_performance:
+                                        self.strategy_performance[strategy_name]["trades"] += 1
+                                    
+                            except Exception as e:
+                                logger.warning("Failed to place immediate trade: %s", e)
+                        
+                        # Small delay between trades
+                        await asyncio.sleep(1)
+                        break  # One trade per strategy
+            
+            logger.info("Generated %d immediate trades", self.total_trades)
+            
+        except Exception as e:
+            logger.exception("Error generating immediate trades: %s", e)
+    
+    def _get_proper_quantity(self, symbol: str) -> int:
+        """Get proper lot size based on symbol type"""
+        try:
+            import random
+            symbol_upper = symbol.upper()
+            
+            # Check for Nifty options
+            if "NIFTY" in symbol_upper and ("CE" in symbol_upper or "PE" in symbol_upper):
+                return 75  # Nifty lot size
+            
+            # Check for Bank Nifty options  
+            elif "BANKNIFTY" in symbol_upper and ("CE" in symbol_upper or "PE" in symbol_upper):
+                return 35  # Bank Nifty lot size
+            
+            # Check for Sensex options
+            elif "SENSEX" in symbol_upper and ("CE" in symbol_upper or "PE" in symbol_upper):
+                return 20  # Sensex lot size
+            
+            # Check for other options (FINNIFTY, MIDCPNIFTY, etc.)
+            elif ("CE" in symbol_upper or "PE" in symbol_upper):
+                # Default options lot size
+                if "FINNIFTY" in symbol_upper:
+                    return 40  # Finnifty lot size
+                elif "MIDCPNIFTY" in symbol_upper:
+                    return 50  # Midcap Nifty lot size
+                else:
+                    return 75  # Default options lot size
+            
+            # For equity stocks, use smaller quantities
+            else:
+                return random.randint(10, 50)  # Equity quantities
+                
+        except Exception as e:
+            logger.warning("Error determining quantity for %s: %s", symbol, e)
+            return 25  # Default fallback
     
     async def _generate_demo_signals(self):
         """Generate real trading signals using live market data and place paper trades"""
@@ -143,8 +255,8 @@ class AITradingEngine:
             import random
             
             for strategy_name, strategy in self.active_strategies.items():
-                # Generate signals based on real market conditions (10% chance per cycle)
-                if random.random() < 0.1:
+                # Generate signals based on real market conditions (50% chance per cycle)
+                if random.random() < 0.5:
                     # Get a random symbol from the strategy
                     if hasattr(strategy, 'symbols') and strategy.symbols:
                         symbol = random.choice(strategy.symbols)
@@ -154,7 +266,9 @@ class AITradingEngine:
                         if price and price > 0:
                             # Generate signal based on market conditions
                             side = random.choice(["BUY", "SELL"])
-                            quantity = random.randint(1, 5)  # Smaller quantities for paper trading
+                            
+                            # Determine quantity based on symbol type
+                            quantity = self._get_proper_quantity(symbol)
                             
                             # Create a real signal
                             from app.strategies.base import Signal

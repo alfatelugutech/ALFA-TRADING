@@ -63,7 +63,21 @@ class AIMarketAnalyzer:
             "ADANITRANS", "ADANIPOWER", "TATACOMM", "RCOM", "IDEA", "VODAFONE",
         ]
         
-        self.options_universe = ["NIFTY", "BANKNIFTY", "SENSEX", "FINNIFTY"]
+        # Options universe with actual option symbols
+        self.options_universe = [
+            # Nifty options (lot size: 75)
+            "NIFTY2590924550CE", "NIFTY2590924600CE", "NIFTY2590924650CE", "NIFTY2590924700CE",
+            "NIFTY2590924550PE", "NIFTY2590924600PE", "NIFTY2590924650PE", "NIFTY2590924700PE",
+            # Bank Nifty options (lot size: 35)  
+            "BANKNIFTY25909245000CE", "BANKNIFTY25909245100CE", "BANKNIFTY25909245200CE",
+            "BANKNIFTY25909245000PE", "BANKNIFTY25909245100PE", "BANKNIFTY25909245200PE",
+            # Sensex options (lot size: 20)
+            "SENSEX25909270000CE", "SENSEX25909271000CE", "SENSEX25909272000CE",
+            "SENSEX25909270000PE", "SENSEX25909271000PE", "SENSEX25909272000PE",
+            # Finnifty options (lot size: 40)
+            "FINNIFTY25909220000CE", "FINNIFTY25909221000CE", "FINNIFTY25909222000CE",
+            "FINNIFTY25909220000PE", "FINNIFTY25909221000PE", "FINNIFTY25909222000PE"
+        ]
         self.futures_universe = ["NIFTY", "BANKNIFTY", "SENSEX", "FINNIFTY"]
         
         # Strategy performance weights (learned from historical data)
