@@ -11,17 +11,35 @@ export default function CandleChart({ symbol, exchange = "NSE" }: { symbol: stri
   const [candles, setCandles] = useState<Candle[]>([]);
 
   const load = async () => {
-    if (!symbol) return;
-    // Ensure a valid absolute URL even if NEXT_PUBLIC_BACKEND_URL is not set
-    const base = backendUrl || (typeof window !== "undefined" ? window.location.origin : "");
-    if (!base) return; // cannot construct a valid URL in non-browser env
-    const url = new URL(`${base}/history`);
-    url.searchParams.set("symbol", symbol);
-    url.searchParams.set("exchange", exchange);
-    url.searchParams.set("interval", interval);
-    url.searchParams.set("count", "120");
-    const data = await (await fetch(url.toString())).json();
-    setCandles(data?.candles || []);
+    try {
+      if (!symbol) return;
+      const base = backendUrl || (typeof window !== "undefined" ? window.location.origin : "");
+      if (!base) return;
+      const url = new URL(`${base}/history`);
+      url.searchParams.set("symbol", symbol);
+      url.searchParams.set("exchange", exchange);
+      url.searchParams.set("interval", interval);
+      url.searchParams.set("count", "120");
+      const resp = await fetch(url.toString());
+      if (!resp.ok) {
+        setCandles([]);
+        return;
+      }
+      let data: any = null;
+      try {
+        data = await resp.json();
+      } catch {
+        setCandles([]);
+        return;
+      }
+      if (data && Array.isArray(data.candles)) {
+        setCandles(data.candles);
+      } else {
+        setCandles([]);
+      }
+    } catch {
+      setCandles([]);
+    }
   };
 
   useEffect(() => { load(); }, [symbol, exchange, interval]);
