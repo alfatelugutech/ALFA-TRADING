@@ -4,12 +4,12 @@ export const metadata: { title: string; description: string } = {
 };
 
 import "./styles.css";
-import React from "react";
+ 
 import StatusPill from "./components/StatusPill";
 import ThemeControls from "./components/ThemeControls";
 import DropdownCloser from "./components/DropdownCloser";
 
-export default function RootLayout({ children }: { children: React.ReactNode }) {
+export default function RootLayout({ children }: { children: any }) {
   return (
     <html lang="en">
       <body className="page">
@@ -54,6 +54,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
                   <div className="card menu menu-left">
                     <a href="/paper-trading">Paper Trading</a>
                     <a href="/trading-dashboard">Manual Trading</a>
+                    <a href="/ai-trading">AI Trading</a>
                   </div>
                 </details>
               </div>
