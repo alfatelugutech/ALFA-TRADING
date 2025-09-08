@@ -57,6 +57,7 @@ export default function AdvancedFeatures() {
   const [alerts, setAlerts] = useState<Alert[]>([]);
   const [backtestResult, setBacktestResult] = useState<BacktestResult | null>(null);
   const [loading, setLoading] = useState(false);
+  const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [newAlert, setNewAlert] = useState({
     symbol: "",
     alert_type: "price_above",
@@ -67,11 +68,26 @@ export default function AdvancedFeatures() {
 
   const loadPortfolioData = async () => {
     try {
+      setErrorMsg(null);
       const response = await fetch(backendUrl + "/portfolio/advanced");
-      const data = await response.json();
+      const data = await response.json().catch(() => ({} as any));
+      if (!response.ok || (data && (data.error || data.status === "error"))) {
+        setPortfolioData(null);
+        setErrorMsg(String((data && (data.error || data.message)) || `Request failed (${response.status})`));
+        return;
+      }
+      // basic shape check
+      const valid = data && typeof data.portfolio_value === "number" && data.risk_metrics;
+      if (!valid) {
+        setPortfolioData(null);
+        setErrorMsg("Unexpected response for /portfolio/advanced. Check backend.");
+        return;
+      }
       setPortfolioData(data);
     } catch (error) {
       console.error("Error loading portfolio data:", error);
+      setPortfolioData(null);
+      setErrorMsg("Failed to load portfolio data. Verify NEXT_PUBLIC_BACKEND_URL and CORS.");
     }
   };
 
@@ -157,6 +173,11 @@ export default function AdvancedFeatures() {
   return (
     <main style={{ maxWidth: 1200, margin: "20px auto", fontFamily: "system-ui, sans-serif" }}>
       <h1>🚀 Advanced Trading Features</h1>
+      {errorMsg && (
+        <div className="card" style={{ margin: "12px 0", padding: 12, border: "1px solid #eab308", background: "#fffbeb", color: "#92400e" }}>
+          <strong>Note:</strong> {errorMsg}
+        </div>
+      )}
       
       {/* Tab Navigation */}
       <div style={{ 
@@ -207,27 +228,27 @@ export default function AdvancedFeatures() {
                 <div style={{ display: "grid", gap: "10px" }}>
                   <div style={{ display: "flex", justifyContent: "space-between" }}>
                     <span>Portfolio Value:</span>
-                    <strong>₹{portfolioData.portfolio_value.toLocaleString()}</strong>
+                    <strong>₹{Number(portfolioData?.portfolio_value ?? 0).toLocaleString()}</strong>
                   </div>
                   <div style={{ display: "flex", justifyContent: "space-between" }}>
                     <span>Total Exposure:</span>
-                    <strong>₹{portfolioData.total_exposure.toLocaleString()}</strong>
+                    <strong>₹{Number(portfolioData?.total_exposure ?? 0).toLocaleString()}</strong>
                   </div>
                   <div style={{ display: "flex", justifyContent: "space-between" }}>
                     <span>Leverage Ratio:</span>
-                    <strong>{portfolioData.leverage_ratio.toFixed(2)}x</strong>
+                    <strong>{Number(portfolioData?.leverage_ratio ?? 0).toFixed(2)}x</strong>
                   </div>
                   <div style={{ display: "flex", justifyContent: "space-between" }}>
                     <span>Sharpe Ratio:</span>
-                    <strong>{portfolioData.risk_metrics.sharpe_ratio.toFixed(2)}</strong>
+                    <strong>{Number(portfolioData?.risk_metrics?.sharpe_ratio ?? 0).toFixed(2)}</strong>
                   </div>
                   <div style={{ display: "flex", justifyContent: "space-between" }}>
                     <span>Max Drawdown:</span>
-                    <strong>{(portfolioData.risk_metrics.max_drawdown * 100).toFixed(2)}%</strong>
+                    <strong>{(Number(portfolioData?.risk_metrics?.max_drawdown ?? 0) * 100).toFixed(2)}%</strong>
                   </div>
                   <div style={{ display: "flex", justifyContent: "space-between" }}>
                     <span>VaR (95%):</span>
-                    <strong>₹{portfolioData.risk_metrics.var_95.toFixed(2)}</strong>
+                    <strong>₹{Number(portfolioData?.risk_metrics?.var_95 ?? 0).toFixed(2)}</strong>
                   </div>
                   <div style={{ display: "flex", justifyContent: "space-between" }}>
                     <span>Risk Level:</span>
@@ -249,9 +270,9 @@ export default function AdvancedFeatures() {
                 backgroundColor: "#f9f9f9"
               }}>
                 <h3>Risk Violations</h3>
-                {portfolioData.risk_violations.length > 0 ? (
+                {(Array.isArray(portfolioData?.risk_violations) ? portfolioData!.risk_violations : []).length > 0 ? (
                   <ul style={{ color: "#F44336" }}>
-                    {portfolioData.risk_violations.map((violation, index) => (
+                    {(Array.isArray(portfolioData?.risk_violations) ? portfolioData!.risk_violations : []).map((violation, index) => (
                       <li key={index}>{violation}</li>
                     ))}
                   </ul>
@@ -282,7 +303,7 @@ export default function AdvancedFeatures() {
                       </tr>
                     </thead>
                     <tbody>
-                      {portfolioData.positions.map((position, index) => (
+                      {(Array.isArray(portfolioData?.positions) ? portfolioData!.positions : []).map((position, index) => (
                         <tr key={index}>
                           <td style={{ padding: "10px" }}>{position.symbol}</td>
                           <td style={{ padding: "10px", textAlign: "right" }}>{position.quantity}</td>

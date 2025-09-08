@@ -7,11 +7,13 @@ import "./styles.css";
 import React from "react";
 import StatusPill from "./components/StatusPill";
 import ThemeControls from "./components/ThemeControls";
+import DropdownCloser from "./components/DropdownCloser";
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
     <html lang="en">
       <body className="page">
+        <DropdownCloser />
         <header className="card sticky-top" style={{ maxWidth: 1100, margin: "12px auto", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
           <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
             <div style={{ fontWeight: 800, letterSpacing: .4, background: "linear-gradient(90deg, #60a5fa, #a78bfa)", WebkitBackgroundClip: "text", backgroundClip: "text", color: "transparent" }}>Zerodha Auto Trader</div>
@@ -51,31 +53,11 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
                   </div>
                 </details>
               </div>
-              <div className="dropdown">
-                <details>
-                  <summary>Tools ▾</summary>
-                  <div className="card menu menu-left">
-                    <a href="/backtesting">Backtesting</a>
-                    <a href="/settings">Settings</a>
-                  </div>
-                </details>
-              </div>
+              {/* Tools dropdown removed per user request */}
             </nav>
           </div>
           <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
             <ThemeControls />
-            <div className="dropdown">
-              <details>
-                <summary>More ▾</summary>
-                <div className="card menu">
-                  <a href="/strategy-builder">Strategy Builder</a>
-                  <a href="/backtesting">Backtesting</a>
-                  <a href="/risk">Risk</a>
-                  <a href="/trade-reports">Reports</a>
-                  <a href="/settings">Settings</a>
-                </div>
-              </details>
-            </div>
             <StatusPill />
           </div>
         </header>
