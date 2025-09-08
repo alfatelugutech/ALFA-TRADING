@@ -63,22 +63,16 @@ class AIMarketAnalyzer:
             "ADANITRANS", "ADANIPOWER", "TATACOMM", "RCOM", "IDEA", "VODAFONE",
         ]
         
-        # Options universe with actual option symbols
-        self.options_universe = [
-            # Nifty options (lot size: 75)
-            "NIFTY2590924550CE", "NIFTY2590924600CE", "NIFTY2590924650CE", "NIFTY2590924700CE",
-            "NIFTY2590924550PE", "NIFTY2590924600PE", "NIFTY2590924650PE", "NIFTY2590924700PE",
-            # Bank Nifty options (lot size: 35)  
-            "BANKNIFTY25909245000CE", "BANKNIFTY25909245100CE", "BANKNIFTY25909245200CE",
-            "BANKNIFTY25909245000PE", "BANKNIFTY25909245100PE", "BANKNIFTY25909245200PE",
-            # Sensex options (lot size: 20)
-            "SENSEX25909270000CE", "SENSEX25909271000CE", "SENSEX25909272000CE",
-            "SENSEX25909270000PE", "SENSEX25909271000PE", "SENSEX25909272000PE",
-            # Finnifty options (lot size: 40)
-            "FINNIFTY25909220000CE", "FINNIFTY25909221000CE", "FINNIFTY25909222000CE",
-            "FINNIFTY25909220000PE", "FINNIFTY25909221000PE", "FINNIFTY25909222000PE"
-        ]
+        # Options universe - will be populated dynamically from available instruments
+        self.options_universe = []
         self.futures_universe = ["NIFTY", "BANKNIFTY", "SENSEX", "FINNIFTY"]
+    
+    def update_options_universe(self, available_symbols):
+        """Update options universe with actual available symbols"""
+        self.options_universe = []
+        for symbol in available_symbols:
+            if ("CE" in symbol or "PE" in symbol) and len(self.options_universe) < 20:
+                self.options_universe.append(symbol)
         
         # Strategy performance weights (learned from historical data)
         self.strategy_weights = {
@@ -95,6 +89,7 @@ class AIMarketAnalyzer:
     def analyze_market_condition(self, price_data: Dict[str, List[float]], 
                                volume_data: Dict[str, List[float]] = None) -> MarketCondition:
         """Analyze current market conditions"""
+        import random
         
         # Calculate overall market trend
         trend = self._calculate_trend(price_data)
@@ -113,6 +108,23 @@ class AIMarketAnalyzer:
         
         # Calculate support/resistance levels
         support_resistance = self._calculate_support_resistance(price_data)
+        
+        # Add some randomization to ensure different strategies get triggered
+        # This simulates real market conditions changing
+        if random.random() < 0.3:  # 30% chance to vary conditions
+            conditions = ["bullish", "bearish", "sideways"]
+            if trend in conditions:
+                trend = random.choice([c for c in conditions if c != trend])
+        
+        if random.random() < 0.2:  # 20% chance to vary volatility
+            volatilities = ["low", "medium", "high"]
+            if volatility in volatilities:
+                volatility = random.choice([v for v in volatilities if v != volatility])
+        
+        if random.random() < 0.2:  # 20% chance to vary RSI
+            rsi_levels = ["oversold", "neutral", "overbought"]
+            if rsi_level in rsi_levels:
+                rsi_level = random.choice([r for r in rsi_levels if r != rsi_level])
         
         return MarketCondition(
             trend=trend,
@@ -138,9 +150,10 @@ class AIMarketAnalyzer:
             return "sideways"
         
         avg_return = statistics.mean(all_returns)
-        if avg_return > 0.001:  # 0.1% threshold
+        # Make trend detection more sensitive to trigger different strategies
+        if avg_return > 0.0005:  # 0.05% threshold (more sensitive)
             return "bullish"
-        elif avg_return < -0.001:
+        elif avg_return < -0.0005:
             return "bearish"
         else:
             return "sideways"

@@ -82,6 +82,35 @@ setup_logging(cfg.log_level)
 
 broker = ZerodhaClient(api_key=cfg.zerodha_api_key, api_secret=cfg.zerodha_api_secret, access_token=cfg.access_token)
 
+# Initialize authentication cache if we have a valid access token
+def _initialize_auth_cache():
+    """Initialize authentication cache on startup if access token is available"""
+    if cfg.zerodha_api_key == "demo_key":
+        auth_cache["is_authenticated"] = True
+        auth_cache["user_id"] = "DEMO_USER"
+        auth_cache["last_check"] = time.time()
+        logger.info("Demo mode: Authentication cache initialized")
+        return
+    
+    if cfg.access_token:
+        try:
+            broker.kite.set_access_token(cfg.access_token)
+            prof = broker.kite.profile()
+            user_id = prof.get("user_id")
+            
+            auth_cache["is_authenticated"] = True
+            auth_cache["user_id"] = user_id
+            auth_cache["last_check"] = time.time()
+            auth_cache["access_token"] = cfg.access_token
+            
+            logger.info("Authentication cache initialized for user: %s (cached for 24 hours)", user_id)
+        except Exception as e:
+            logger.warning("Failed to initialize authentication cache: %s", str(e))
+            auth_cache["is_authenticated"] = False
+
+# Initialize cache on startup
+_initialize_auth_cache()
+
 
 def _load_or_download_instruments() -> list:
     csv_path = Path(cfg.instruments_csv_path)
@@ -113,14 +142,73 @@ def _load_or_download_instruments() -> list:
 
 
 def _check_auth_or_demo():
-    """Check authentication or return demo mode status"""
+    """Check authentication or return demo mode status with caching"""
+    import time
+    
     if cfg.zerodha_api_key == "demo_key":
         return True, "DEMO_USER"
+    
+    current_time = time.time()
+    
+    # Check if we have a valid cached authentication
+    if (auth_cache["is_authenticated"] and 
+        auth_cache["last_check"] > 0 and 
+        (current_time - auth_cache["last_check"]) < auth_cache["cache_duration"]):
+        logger.debug("Using cached authentication for user: %s", auth_cache["user_id"])
+        return True, auth_cache["user_id"]
+    
+    # Cache expired or no cache, check authentication
     try:
         prof = broker.kite.profile()
-        return True, prof.get("user_id")
-    except Exception:
+        user_id = prof.get("user_id")
+        
+        # Update cache
+        auth_cache["is_authenticated"] = True
+        auth_cache["user_id"] = user_id
+        auth_cache["last_check"] = current_time
+        auth_cache["access_token"] = broker.kite.access_token
+        
+        logger.info("Authentication successful for user: %s (cached for 24 hours)", user_id)
+        return True, user_id
+        
+    except Exception as e:
+        # Clear cache on authentication failure
+        auth_cache["is_authenticated"] = False
+        auth_cache["user_id"] = None
+        auth_cache["last_check"] = 0
+        auth_cache["access_token"] = None
+        
+        logger.warning("Authentication failed: %s", str(e))
         return False, None
+
+
+def _is_market_open(symbol_type: str = "equity") -> bool:
+    """Check if market is open for trading"""
+    try:
+        from datetime import datetime, time
+        import pytz
+        
+        # Get current IST time
+        ist = pytz.timezone('Asia/Kolkata')
+        now = datetime.now(ist)
+        current_time = now.time()
+        
+        # Get trading hours for symbol type
+        hours = TRADING_HOURS.get(symbol_type, TRADING_HOURS["equity"])
+        start_time = time.fromisoformat(hours["start"])
+        end_time = time.fromisoformat(hours["end"])
+        
+        # Check if current time is within trading hours
+        is_open = start_time <= current_time <= end_time
+        
+        # Also check if it's a weekday (Monday=0, Sunday=6)
+        is_weekday = now.weekday() < 5
+        
+        return is_open and is_weekday
+        
+    except Exception:
+        # If timezone check fails, assume market is open for demo
+        return True
 
 
 def _create_demo_instruments() -> list:
@@ -212,6 +300,24 @@ trailing_stop_pct: float = float(os.getenv("TRAILING_STOP_PCT", "0.0") or 0.0)  
 trailing_stop_points: float = float(os.getenv("TRAILING_STOP_POINTS", "10") or 10.0)
 trailing_state: Dict[str, Dict[str, float]] = {}
 trailing_overrides_pct: Dict[str, float] = {}  # key: EXCHANGE:SYMBOL -> pct
+
+# Authentication cache
+auth_cache = {
+    "is_authenticated": False,
+    "user_id": None,
+    "last_check": 0,
+    "cache_duration": 24 * 60 * 60,  # 24 hours in seconds
+    "access_token": None
+}
+
+# Trading hours (IST)
+TRADING_HOURS = {
+    "equity": {"start": "09:15", "end": "15:30"},
+    "options": {"start": "09:15", "end": "15:30"},
+    "futures": {"start": "09:15", "end": "15:30"},
+    "currency": {"start": "09:00", "end": "17:00"},
+    "commodity": {"start": "09:00", "end": "23:30"}
+}
 
 # Auto-schedule
 schedule_cfg: Dict[str, object] = {
@@ -415,10 +521,10 @@ def root():
 def subscribe(req: SubscribeRequest):
     global symbol_to_token, token_to_symbol
     mode_full = (req.mode or "ltp").lower() == "full"
-    # Validate token by fetching profile; if invalid, ask client to login
-    try:
-        broker.kite.profile()
-    except Exception:
+    
+    # Check authentication using cached method
+    auth_ok, user_id = _check_auth_or_demo()
+    if not auth_ok:
         return {"error": "NOT_AUTHENTICATED", "message": "Login required. Use /auth/login_url then /auth/exchange."}
     ensure_ticker(mode_full=mode_full)
     mapping = resolve_tokens_by_symbols(instruments, req.symbols, exchange=req.exchange)
@@ -488,12 +594,27 @@ def auth_login_url():
 
 @app.post("/auth/exchange")
 def auth_exchange(req: ExchangeRequest):
-    global ticker, instruments
+    global ticker, instruments, auth_cache
+    import time
+    
     data = broker.generate_session(req.request_token)
     access_token = data.get("access_token")
     # Set in runtime
     cfg.access_token = access_token
     broker.kite.set_access_token(access_token)
+    
+    # Update authentication cache
+    try:
+        prof = broker.kite.profile()
+        user_id = prof.get("user_id")
+        auth_cache["is_authenticated"] = True
+        auth_cache["user_id"] = user_id
+        auth_cache["last_check"] = time.time()
+        auth_cache["access_token"] = access_token
+        logger.info("Authentication successful for user: %s (cached for 24 hours)", user_id)
+    except Exception as e:
+        logger.warning("Failed to verify authentication after token exchange: %s", str(e))
+    
     # Reset ticker so next subscribe uses fresh token
     ticker = None
     # Optionally refresh instruments
@@ -523,6 +644,46 @@ def auth_profile():
     except Exception as e:
         logger.exception("Profile fetch failed")
         return {"error": str(e)}
+
+@app.get("/auth/status")
+def auth_status():
+    """Get authentication status with cache info"""
+    import time
+    
+    if cfg.zerodha_api_key == "demo_key":
+        return {
+            "authenticated": True,
+            "user_id": "DEMO_USER",
+            "demo_mode": True,
+            "cache_info": None
+        }
+    
+    current_time = time.time()
+    cache_age = current_time - auth_cache["last_check"] if auth_cache["last_check"] > 0 else 0
+    cache_expires_in = auth_cache["cache_duration"] - cache_age if cache_age < auth_cache["cache_duration"] else 0
+    
+    return {
+        "authenticated": auth_cache["is_authenticated"],
+        "user_id": auth_cache["user_id"],
+        "demo_mode": False,
+        "cache_info": {
+            "cached": auth_cache["is_authenticated"] and cache_age < auth_cache["cache_duration"],
+            "cache_age_hours": round(cache_age / 3600, 2),
+            "expires_in_hours": round(cache_expires_in / 3600, 2) if cache_expires_in > 0 else 0,
+            "last_check": auth_cache["last_check"]
+        }
+    }
+
+@app.post("/auth/clear_cache")
+def auth_clear_cache():
+    """Clear authentication cache to force re-authentication"""
+    global auth_cache
+    auth_cache["is_authenticated"] = False
+    auth_cache["user_id"] = None
+    auth_cache["last_check"] = 0
+    auth_cache["access_token"] = None
+    logger.info("Authentication cache cleared")
+    return {"status": "Cache cleared", "message": "Next request will require re-authentication"}
 
 
 @app.get("/status")
@@ -1567,7 +1728,7 @@ def options_expiries(underlying: str):
     try:
         global instruments
         u = (underlying or "").upper()
-        name_alias = {"SENSEX": "SENSEX", "BSESENSEX": "SENSEX", "NIFTY": "NIFTY", "BANKNIFTY": "BANKNIFTY", "FINNIFTY": "FINNIFTY"}
+        name_alias = {"SENSEX": "SENSEX", "BSESENSEX": "SENSEX", "NIFTY": "NIFTY", "BANKNIFTY": "NIFTY BANK", "FINNIFTY": "FINNIFTY"}
         u_name = name_alias.get(u, u)
         now_ms = int(time.time() * 1000)
         cached = _expiries_cache.get(u)
@@ -1603,7 +1764,7 @@ def options_chain(underlying: str, expiry: str, count: int = 10, around: float |
         global instruments
         u = (underlying or "").upper()
         # Map index names that differ in instruments 'name'
-        name_alias = {"SENSEX": "SENSEX", "NIFTY": "NIFTY", "BANKNIFTY": "BANKNIFTY", "FINNIFTY": "FINNIFTY", "BSESENSEX": "SENSEX"}
+        name_alias = {"SENSEX": "SENSEX", "NIFTY": "NIFTY", "BANKNIFTY": "NIFTY BANK", "FINNIFTY": "FINNIFTY", "BSESENSEX": "SENSEX"}
         u_name = name_alias.get(u, u)
         exp_param = (expiry or "").strip()
         items_all = [i for i in instruments if i.exchange in {"NFO", "BFO"} and (i.name or "").upper() == u_name and i.instrument_type in {"CE", "PE"}]
@@ -1665,6 +1826,37 @@ def options_chain(underlying: str, expiry: str, count: int = 10, around: float |
         logger.exception("options chain error")
         return {"ce": [], "pe": [], "strikes": []}
 
+
+@app.get("/market/status")
+def market_status():
+    """Get market status and trading hours"""
+    try:
+        from datetime import datetime
+        import pytz
+        
+        ist = pytz.timezone('Asia/Kolkata')
+        now = datetime.now(ist)
+        current_time = now.strftime("%H:%M")
+        current_date = now.strftime("%Y-%m-%d")
+        
+        # Check if market is open
+        equity_open = _is_market_open("equity")
+        options_open = _is_market_open("options")
+        
+        return {
+            "current_time_ist": current_time,
+            "current_date": current_date,
+            "equity_market_open": equity_open,
+            "options_market_open": options_open,
+            "trading_hours": {
+                "equity": TRADING_HOURS["equity"],
+                "options": TRADING_HOURS["options"],
+                "futures": TRADING_HOURS["futures"]
+            },
+            "next_trading_day": "Monday" if now.weekday() >= 5 else "Today"
+        }
+    except Exception as e:
+        return {"error": str(e)}
 
 @app.get("/status/all")
 def status_all():
@@ -1836,6 +2028,15 @@ def ai_start_trading(req: AIStartRequest, background_tasks: BackgroundTasks):
     try:
         ai_trade_capital = req.capital
         ai_active = True
+        
+        # Enable automatic risk management with trailing stops
+        global risk_auto_close, trailing_stop_pct, trailing_stop_points
+        risk_auto_close = True
+        trailing_stop_pct = 0.02  # 2% trailing stop
+        trailing_stop_points = 10  # 10 points trailing stop
+        
+        logger.info("AI Trading started with capital: ₹%d, risk: %.2f%%, trailing stops enabled", 
+                    req.capital, req.risk_pct * 100)
         
         # Resolve and subscribe to default AI symbols so the AI gets live ticks
         try:

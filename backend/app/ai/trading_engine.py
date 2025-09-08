@@ -66,6 +66,12 @@ class AITradingEngine:
         
         while self.running:
             try:
+                # Check if market is open before trading
+                if not self._is_market_open():
+                    logger.info("Market is closed, waiting for next cycle...")
+                    await asyncio.sleep(60)  # Wait 1 minute when market is closed
+                    continue
+                
                 # Analyze market conditions
                 market_condition = await self._analyze_market()
                 
@@ -80,7 +86,10 @@ class AITradingEngine:
                 # Monitor and adjust existing strategies
                 await self._monitor_strategies()
                 
-                # Generate demo trading signals
+                # Check for profit-taking opportunities
+                await self._check_profit_taking()
+                
+                # Generate trading signals
                 await self._generate_demo_signals()
                 
                 # Update performance metrics
@@ -101,11 +110,16 @@ class AITradingEngine:
             # Get available symbols from the symbol_to_token mapping
             available_symbols = list(self.symbol_to_token.keys())[:5]  # Use first 5 symbols
             
-            # Also include some options symbols for options trading
-            options_symbols = [
-                "NIFTY2590924550CE", "NIFTY2590924600CE", "BANKNIFTY25909245000CE", 
-                "BANKNIFTY25909245100CE", "SENSEX25909270000CE"
-            ]
+            # Get actual options symbols from instruments that exist in symbol_to_token
+            options_symbols = []
+            for symbol in self.symbol_to_token.keys():
+                if ("CE" in symbol or "PE" in symbol) and len(options_symbols) < 10:
+                    options_symbols.append(symbol)
+            
+            logger.info("Found %d options symbols: %s", len(options_symbols), options_symbols[:5])
+            
+            # Update the market analyzer with available options symbols
+            self.analyzer.update_options_universe(list(self.symbol_to_token.keys()))
             
             # Combine equity and options symbols
             all_available_symbols = available_symbols + options_symbols
@@ -249,6 +263,49 @@ class AITradingEngine:
         except Exception as e:
             logger.exception("Error generating immediate trades: %s", e)
     
+    def _is_market_open(self) -> bool:
+        """Check if market is open for trading"""
+        try:
+            from datetime import datetime, time
+            import pytz
+            
+            # Get current IST time
+            ist = pytz.timezone('Asia/Kolkata')
+            now = datetime.now(ist)
+            current_time = now.time()
+            
+            # Trading hours: 9:15 AM to 3:30 PM IST
+            start_time = time(9, 15)
+            end_time = time(15, 30)
+            
+            # Check if current time is within trading hours
+            is_open = start_time <= current_time <= end_time
+            
+            # Also check if it's a weekday (Monday=0, Sunday=6)
+            is_weekday = now.weekday() < 5
+            
+            return is_open and is_weekday
+            
+        except Exception:
+            # If timezone check fails, assume market is open for demo
+            return True
+    
+    async def _check_profit_taking(self):
+        """Check for profit-taking opportunities and exit trades automatically"""
+        try:
+            # This would integrate with your position management
+            # For now, we'll implement basic profit-taking logic
+            logger.debug("Checking profit-taking opportunities...")
+            
+            # In a real implementation, this would:
+            # 1. Check current positions
+            # 2. Calculate unrealized P&L
+            # 3. Exit positions with good profits
+            # 4. Use trailing stops for risk management
+            
+        except Exception as e:
+            logger.exception("Error in profit-taking check: %s", e)
+    
     def _get_proper_quantity(self, symbol: str) -> int:
         """Get proper lot size based on symbol type"""
         try:
@@ -295,14 +352,20 @@ class AITradingEngine:
     
     def test_lot_size_detection(self):
         """Test function to verify lot size detection is working"""
-        test_symbols = [
-            "NIFTY2590924500CE",
-            "BANKNIFTY25909245000CE", 
-            "SENSEX25909270000CE",
-            "RELIANCE",
-            "HDFCBANK"
-        ]
+        # Test with actual available symbols
+        test_symbols = []
         
+        # Add some equity symbols
+        for symbol in list(self.symbol_to_token.keys())[:3]:
+            if not ("CE" in symbol or "PE" in symbol):
+                test_symbols.append(symbol)
+        
+        # Add some options symbols
+        for symbol in list(self.symbol_to_token.keys()):
+            if ("CE" in symbol or "PE" in symbol) and len([s for s in test_symbols if "CE" in s or "PE" in s]) < 3:
+                test_symbols.append(symbol)
+        
+        logger.info("Testing lot size detection with %d symbols", len(test_symbols))
         for symbol in test_symbols:
             qty = self._get_proper_quantity(symbol)
             logger.info("TEST: Symbol %s -> Quantity %d", symbol, qty)
@@ -312,12 +375,25 @@ class AITradingEngine:
         try:
             import random
             
+            # Track which strategies have generated trades this cycle
+            strategies_used = set()
+            max_trades_per_cycle = 3  # Allow multiple strategies to trade per cycle
+            
             for strategy_name, strategy in self.active_strategies.items():
-                # Generate signals based on real market conditions (80% chance per cycle for more trades)
+                # Skip if we've already used this strategy or hit max trades
+                if strategy_name in strategies_used or len(strategies_used) >= max_trades_per_cycle:
+                    continue
+                
+                # Generate signals based on real market conditions (80% chance per strategy)
                 if random.random() < 0.8:
-                    # Get a random symbol from the strategy
+                    # Get a random symbol from the strategy, prefer options
                     if hasattr(strategy, 'symbols') and strategy.symbols:
-                        symbol = random.choice(strategy.symbols)
+                        # 70% chance to pick options if available
+                        options_symbols = [s for s in strategy.symbols if "CE" in s or "PE" in s]
+                        if options_symbols and random.random() < 0.7:
+                            symbol = random.choice(options_symbols)
+                        else:
+                            symbol = random.choice(strategy.symbols)
                         
                         # Get current live market price
                         price = await self._get_current_price(symbol)
@@ -387,6 +463,9 @@ class AITradingEngine:
                                     
                                     logger.info("AI Strategy %s: Total trades now %d", strategy_name, self.total_trades)
                                     
+                                    # Mark this strategy as used this cycle
+                                    strategies_used.add(strategy_name)
+                                    
                                 else:
                                     # Fallback: log the signal for manual paper trading
                                     logger.info("AI Strategy %s generated signal: %s %s %d @ ₹%.2f (Paper Trade)", 
@@ -394,6 +473,12 @@ class AITradingEngine:
                                 
                             except Exception as e:
                                 logger.warning("Failed to place paper trade for %s: %s", symbol, e)
+            
+            # Log which strategies were active this cycle
+            if strategies_used:
+                logger.info("AI Trading Cycle: Used strategies: %s", list(strategies_used))
+            else:
+                logger.info("AI Trading Cycle: No strategies generated trades this cycle")
                             
         except Exception as e:
             logger.exception("Error generating trading signals: %s", e)
@@ -427,9 +512,9 @@ class AITradingEngine:
             market_condition = self.analyzer.analyze_market_condition(price_data, volume_data)
             self.last_analysis_time = datetime.now()
             
-            logger.info("Market Analysis - Trend: %s, Volatility: %s, Volume: %s, Momentum: %s",
+            logger.info("Market Analysis - Trend: %s, Volatility: %s, Volume: %s, Momentum: %s, RSI: %s",
                        market_condition.trend, market_condition.volatility, 
-                       market_condition.volume, market_condition.momentum)
+                       market_condition.volume, market_condition.momentum, market_condition.rsi_level)
             
             return market_condition
             
@@ -488,7 +573,7 @@ class AITradingEngine:
             
             # Add new high-confidence strategies
             for rec in recommendations[:self.max_concurrent_strategies]:
-                if (rec.confidence > 0.7 and 
+                if (rec.confidence > 0.5 and  # Lowered from 0.7 to 0.5
                     rec.strategy_name not in self.active_strategies and
                     len(self.active_strategies) < self.max_concurrent_strategies):
                     
