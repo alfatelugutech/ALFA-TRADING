@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import time
 from typing import Any, Dict, Optional
 
 from kiteconnect import KiteConnect
@@ -75,5 +76,41 @@ class ZerodhaClient:
 
     def instruments(self, exchange: Optional[str] = None):
         return self._kite.instruments(exchange)
+
+    def place_paper_order(
+        self,
+        symbol: str,
+        side: str,
+        quantity: int,
+        price: float,
+        source: str = "ai"
+    ) -> Dict[str, Any]:
+        """Place a paper trade (virtual order) for testing"""
+        try:
+            # Convert side to transaction type
+            transaction_type = "BUY" if side.upper() == "BUY" else "SELL"
+            
+            # Log the paper trade
+            logger.info(
+                "PAPER TRADE: %s %s %d @ ₹%.2f (Source: %s)", 
+                transaction_type, symbol, quantity, price, source
+            )
+            
+            # Return a mock order response
+            return {
+                "order_id": f"PAPER_{int(time.time() * 1000)}",
+                "status": "COMPLETE",
+                "symbol": symbol,
+                "side": side,
+                "quantity": quantity,
+                "price": price,
+                "source": source,
+                "timestamp": time.time(),
+                "paper_trade": True
+            }
+            
+        except Exception as e:
+            logger.exception("Error placing paper trade: %s", e)
+            return {"error": str(e)}
 
 

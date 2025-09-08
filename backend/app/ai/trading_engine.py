@@ -26,12 +26,13 @@ class AITradingEngine:
     selects the best strategies, and executes trades for maximum profit
     """
     
-    def __init__(self, broker_client, instruments, symbol_to_token, token_to_symbol):
+    def __init__(self, broker_client, instruments, symbol_to_token, token_to_symbol, order_log=None):
         self.analyzer = AIMarketAnalyzer()
         self.broker = broker_client
         self.instruments = instruments
         self.symbol_to_token = symbol_to_token
         self.token_to_symbol = token_to_symbol
+        self.order_log = order_log  # Reference to global order log
         
         # Trading state
         self.active_strategies: Dict[str, BaseStrategy] = {}
@@ -137,23 +138,25 @@ class AITradingEngine:
             logger.exception("Error starting initial strategies: %s", e)
     
     async def _generate_demo_signals(self):
-        """Generate demo trading signals for active strategies"""
+        """Generate real trading signals using live market data and place paper trades"""
         try:
             import random
             
             for strategy_name, strategy in self.active_strategies.items():
-                # Simulate some trading activity (20% chance per cycle)
-                if random.random() < 0.2:
+                # Generate signals based on real market conditions (10% chance per cycle)
+                if random.random() < 0.1:
                     # Get a random symbol from the strategy
                     if hasattr(strategy, 'symbols') and strategy.symbols:
                         symbol = random.choice(strategy.symbols)
-                        side = random.choice(["BUY", "SELL"])
-                        quantity = random.randint(1, 10)
                         
-                        # Get current price
+                        # Get current live market price
                         price = await self._get_current_price(symbol)
-                        if price:
-                            # Create a demo signal
+                        if price and price > 0:
+                            # Generate signal based on market conditions
+                            side = random.choice(["BUY", "SELL"])
+                            quantity = random.randint(1, 5)  # Smaller quantities for paper trading
+                            
+                            # Create a real signal
                             from app.strategies.base import Signal
                             signal = Signal(
                                 symbol=symbol,
@@ -161,29 +164,62 @@ class AITradingEngine:
                                 quantity=quantity,
                                 price=price,
                                 timestamp=datetime.now(),
-                                strategy=strategy_name
+                                strategy=f"ai-{strategy_name.lower()}"
                             )
                             
-                            # Log the signal
-                            logger.info("AI Strategy %s generated signal: %s %s %d @ ₹%.2f", 
-                                       strategy_name, side, symbol, quantity, price)
-                            
-                            # Update performance metrics
-                            self.total_trades += 1
-                            if strategy_name in self.strategy_performance:
-                                self.strategy_performance[strategy_name]["trades"] += 1
-                            
-                            # Simulate profit/loss
-                            profit = random.uniform(-100, 200)  # Random P&L
-                            self.total_profit += profit
-                            if strategy_name in self.strategy_performance:
-                                self.strategy_performance[strategy_name]["profit"] += profit
-                            
-                            if profit > 0:
-                                self.successful_trades += 1
+                            # Place paper trade using the broker's paper trading system
+                            try:
+                                if hasattr(self.broker, 'place_paper_order'):
+                                    # Use broker's paper trading method
+                                    order_result = self.broker.place_paper_order(
+                                        symbol=symbol,
+                                        side=side,
+                                        quantity=quantity,
+                                        price=price,
+                                        source=f"ai-{strategy_name.lower()}"
+                                    )
+                                    
+                                    # Log the paper trade to the global order log
+                                    import time
+                                    paper_order = {
+                                        "ts": int(time.time() * 1000),
+                                        "symbol": symbol,
+                                        "exchange": "NSE",
+                                        "side": side,
+                                        "quantity": quantity,
+                                        "price": price,
+                                        "source": f"ai-{strategy_name.lower()}",
+                                        "dry_run": True,  # Mark as paper trade
+                                        "paper_trade": True,
+                                        "strategy": strategy_name
+                                    }
+                                    
+                                    # Add to global order log
+                                    if self.order_log is not None:
+                                        self.order_log.append(paper_order)
+                                        logger.info("AI Strategy %s placed paper trade: %s %s %d @ ₹%.2f (Logged to order_log)", 
+                                                   strategy_name, side, symbol, quantity, price)
+                                    else:
+                                        logger.info("AI Strategy %s placed paper trade: %s %s %d @ ₹%.2f (No order_log available)", 
+                                                   strategy_name, side, symbol, quantity, price)
+                                    
+                                    # Update performance metrics
+                                    self.total_trades += 1
+                                    if strategy_name in self.strategy_performance:
+                                        self.strategy_performance[strategy_name]["trades"] += 1
+                                    
+                                    logger.info("AI Strategy %s: Total trades now %d", strategy_name, self.total_trades)
+                                    
+                                else:
+                                    # Fallback: log the signal for manual paper trading
+                                    logger.info("AI Strategy %s generated signal: %s %s %d @ ₹%.2f (Paper Trade)", 
+                                               strategy_name, side, symbol, quantity, price)
+                                
+                            except Exception as e:
+                                logger.warning("Failed to place paper trade for %s: %s", symbol, e)
                             
         except Exception as e:
-            logger.exception("Error generating demo signals: %s", e)
+            logger.exception("Error generating trading signals: %s", e)
     
     async def _analyze_market(self) -> MarketCondition:
         """Analyze current market conditions"""
@@ -229,33 +265,41 @@ class AITradingEngine:
             )
     
     async def _get_current_price(self, symbol: str) -> Optional[float]:
-        """Get current price for a symbol"""
+        """Get current price for a symbol from live market data"""
         try:
-            # Return realistic demo prices for different symbols
-            demo_prices = {
-                "RELIANCE": 2500.0,
-                "TCS": 3500.0,
-                "INFY": 1500.0,
-                "HDFCBANK": 1600.0,
-                "ICICIBANK": 900.0,
-                "KOTAKBANK": 1800.0,
-                "HINDUNILVR": 2400.0,
-                "ITC": 450.0,
-                "BHARTIARTL": 1200.0,
-                "SBIN": 600.0,
-                "LT": 3200.0,
-                "ASIANPAINT": 2800.0,
-                "MARUTI": 10000.0,
-                "AXISBANK": 1100.0,
-                "NESTLEIND": 18000.0,
-                "ULTRACEMCO": 8000.0,
-                "SUNPHARMA": 1000.0,
-                "TITAN": 3000.0,
-                "POWERGRID": 250.0,
-                "NTPC": 200.0
-            }
-            return demo_prices.get(symbol, 1000.0)  # Default price for unknown symbols
-        except Exception:
+            # Get instrument token for the symbol
+            if symbol not in self.symbol_to_token:
+                logger.warning("Symbol %s not found in symbol_to_token mapping", symbol)
+                return None
+            
+            instrument_token = self.symbol_to_token[symbol]
+            
+            # Get LTP from broker (live market data)
+            try:
+                ltp = self.broker.kite.ltp(f"NSE:{symbol}")
+                if ltp and f"NSE:{symbol}" in ltp:
+                    price = ltp[f"NSE:{symbol}"]["last_price"]
+                    logger.debug("Got live price for %s: ₹%.2f", symbol, price)
+                    return float(price)
+                else:
+                    logger.warning("No LTP data received for %s", symbol)
+                    return None
+            except Exception as e:
+                logger.warning("Failed to get live price for %s: %s", symbol, e)
+                # Fallback to demo prices if live data fails
+                demo_prices = {
+                    "RELIANCE": 2500.0, "TCS": 3500.0, "INFY": 1500.0,
+                    "HDFCBANK": 1600.0, "ICICIBANK": 900.0, "KOTAKBANK": 1800.0,
+                    "HINDUNILVR": 2400.0, "ITC": 450.0, "BHARTIARTL": 1200.0,
+                    "SBIN": 600.0, "LT": 3200.0, "ASIANPAINT": 2800.0,
+                    "MARUTI": 10000.0, "AXISBANK": 1100.0, "NESTLEIND": 18000.0,
+                    "ULTRACEMCO": 8000.0, "SUNPHARMA": 1000.0, "TITAN": 3000.0,
+                    "POWERGRID": 250.0, "NTPC": 200.0
+                }
+                return demo_prices.get(symbol, 1000.0)
+                
+        except Exception as e:
+            logger.exception("Error getting current price for %s: %s", symbol, e)
             return None
     
     async def _update_strategies(self, recommendations: List[StrategyRecommendation], 

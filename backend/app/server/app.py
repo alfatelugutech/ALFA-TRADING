@@ -1740,7 +1740,8 @@ def ai_start_trading(req: AIStartRequest, background_tasks: BackgroundTasks):
             broker_client=broker,
             instruments=instruments,
             symbol_to_token=symbol_to_token,
-            token_to_symbol=token_to_symbol
+            token_to_symbol=token_to_symbol,
+            order_log=order_log  # Pass reference to global order log
         )
         
         # Start AI trading in background using FastAPI background tasks
