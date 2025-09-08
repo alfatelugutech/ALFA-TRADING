@@ -10,7 +10,7 @@ from pathlib import Path
 from typing import Dict, List, Optional
 
 import orjson
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect, BackgroundTasks
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
@@ -1719,7 +1719,7 @@ class AIStartRequest(BaseModel):
 
 
 @app.post("/ai/start")
-def ai_start_trading(req: AIStartRequest):
+def ai_start_trading(req: AIStartRequest, background_tasks: BackgroundTasks):
     """Start AI-powered trading"""
     global ai_active, ai_engine, ai_trade_capital
     
@@ -1743,9 +1743,22 @@ def ai_start_trading(req: AIStartRequest):
             token_to_symbol=token_to_symbol
         )
         
-        # Start AI trading in background
-        import asyncio
-        asyncio.create_task(ai_engine.start_ai_trading(live_mode=req.live))
+        # Start AI trading in background using FastAPI background tasks
+        def run_ai_trading():
+            import asyncio
+            try:
+                # Create a new event loop for this thread
+                loop = asyncio.new_event_loop()
+                asyncio.set_event_loop(loop)
+                loop.run_until_complete(ai_engine.start_ai_trading(live_mode=req.live))
+            except Exception as e:
+                logger.exception("Error in AI trading background task: %s", e)
+                global ai_active
+                ai_active = False
+            finally:
+                loop.close()
+        
+        background_tasks.add_task(run_ai_trading)
         
         logger.info("AI Trading started with capital: %s, live: %s", req.capital, req.live)
         return {"status": "started", "capital": req.capital, "live": req.live}

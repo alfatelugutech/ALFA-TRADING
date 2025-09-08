@@ -52,11 +52,15 @@ class AITradingEngine:
         self.max_risk_per_strategy = 0.02  # 2% risk per strategy
         self.available_capital = 100000.0
         
+        # Control flag
+        self.running = False
+        
     async def start_ai_trading(self, live_mode: bool = False):
         """Start AI-powered trading"""
         logger.info("Starting AI Trading Engine...")
+        self.running = True
         
-        while True:
+        while self.running:
             try:
                 # Analyze market conditions
                 market_condition = await self._analyze_market()
@@ -313,5 +317,6 @@ class AITradingEngine:
     def stop_ai_trading(self):
         """Stop AI trading"""
         logger.info("Stopping AI Trading Engine...")
+        self.running = False
         self.active_strategies.clear()
         self.strategy_performance.clear()
