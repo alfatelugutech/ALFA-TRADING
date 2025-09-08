@@ -26,6 +26,14 @@ export default function OrdersPage() {
   const [demat, setDemat] = useState<any[]>([]);
   const [resetCash, setResetCash] = useState<string>("");
   const [strategyStats, setStrategyStats] = useState<any>({});
+  const [pnl, setPnl] = useState<{ 
+    realized: number; 
+    unrealized: number; 
+    total: number;
+    paper: { realized: number; unrealized: number; total: number };
+    live: { realized: number; unrealized: number; total: number };
+  } | null>(null);
+  const [positions, setPositions] = useState<any[]>([]);
 
   const load = async () => {
     setLoading(true);
@@ -34,9 +42,25 @@ export default function OrdersPage() {
       setOrders(Array.isArray(data) ? data : []);
     } catch {
       // ignore
-    } finally {
-      setLoading(false);
     }
+    
+    // Load PnL data
+    try {
+      const pnlData = await (await fetch(backendUrl + "/pnl"))?.json();
+      setPnl(pnlData);
+    } catch {
+      setPnl(null);
+    }
+    
+    // Load positions data
+    try {
+      const posData = await (await fetch(backendUrl + "/positions"))?.json();
+      setPositions(posData.positions || []);
+    } catch {
+      setPositions([]);
+    }
+    
+    setLoading(false);
   };
 
   useEffect(() => {
@@ -125,6 +149,137 @@ export default function OrdersPage() {
         <a href="/" style={{ color: "#0969da", textDecoration: "none" }}>Home</a>
       </div>
 
+      {/* Profit/Loss Summary */}
+      {pnl && (
+        <div style={{ marginBottom: 16 }}>
+          {/* Main P&L Summary */}
+          <div style={{ 
+            display: "grid", 
+            gridTemplateColumns: "repeat(4, 1fr)", 
+            gap: 16, 
+            marginBottom: 12,
+            padding: 16,
+            backgroundColor: "#f8f9fa",
+            borderRadius: 8,
+            border: "1px solid #e9ecef"
+          }}>
+            <div style={{ textAlign: "center" }}>
+              <div style={{ fontSize: "0.9em", color: "#6c757d", marginBottom: 4 }}>Realized P&L</div>
+              <div style={{ 
+                fontSize: "1.5em", 
+                fontWeight: "bold",
+                color: pnl.realized >= 0 ? "#28a745" : "#dc3545"
+              }}>
+                ₹{pnl.realized.toLocaleString()}
+              </div>
+            </div>
+            <div style={{ textAlign: "center" }}>
+              <div style={{ fontSize: "0.9em", color: "#6c757d", marginBottom: 4 }}>Unrealized P&L</div>
+              <div style={{ 
+                fontSize: "1.5em", 
+                fontWeight: "bold",
+                color: pnl.unrealized >= 0 ? "#28a745" : "#dc3545"
+              }}>
+                ₹{pnl.unrealized.toLocaleString()}
+              </div>
+            </div>
+            <div style={{ textAlign: "center" }}>
+              <div style={{ fontSize: "0.9em", color: "#6c757d", marginBottom: 4 }}>Total P&L</div>
+              <div style={{ 
+                fontSize: "1.5em", 
+                fontWeight: "bold",
+                color: pnl.total >= 0 ? "#28a745" : "#dc3545"
+              }}>
+                ₹{pnl.total.toLocaleString()}
+              </div>
+            </div>
+            <div style={{ textAlign: "center" }}>
+              <div style={{ fontSize: "0.9em", color: "#6c757d", marginBottom: 4 }}>Total Trades</div>
+              <div style={{ fontSize: "1.5em", fontWeight: "bold", color: "#007bff" }}>
+                {orders.length}
+              </div>
+            </div>
+          </div>
+          
+          {/* Paper vs Live Trading Breakdown */}
+          <div style={{ 
+            display: "grid", 
+            gridTemplateColumns: "1fr 1fr", 
+            gap: 12,
+            padding: 12,
+            backgroundColor: "#ffffff",
+            borderRadius: 8,
+            border: "1px solid #e9ecef"
+          }}>
+            <div>
+              <h4 style={{ margin: "0 0 8px 0", color: "#6c757d" }}>📄 Paper Trading</h4>
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 8, fontSize: "0.9em" }}>
+                <div>
+                  <div style={{ color: "#6c757d" }}>Realized</div>
+                  <div style={{ 
+                    fontWeight: "bold",
+                    color: pnl.paper.realized >= 0 ? "#28a745" : "#dc3545"
+                  }}>
+                    ₹{pnl.paper.realized.toLocaleString()}
+                  </div>
+                </div>
+                <div>
+                  <div style={{ color: "#6c757d" }}>Unrealized</div>
+                  <div style={{ 
+                    fontWeight: "bold",
+                    color: pnl.paper.unrealized >= 0 ? "#28a745" : "#dc3545"
+                  }}>
+                    ₹{pnl.paper.unrealized.toLocaleString()}
+                  </div>
+                </div>
+                <div>
+                  <div style={{ color: "#6c757d" }}>Total</div>
+                  <div style={{ 
+                    fontWeight: "bold",
+                    color: pnl.paper.total >= 0 ? "#28a745" : "#dc3545"
+                  }}>
+                    ₹{pnl.paper.total.toLocaleString()}
+                  </div>
+                </div>
+              </div>
+            </div>
+            
+            <div>
+              <h4 style={{ margin: "0 0 8px 0", color: "#6c757d" }}>💰 Live Trading</h4>
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 8, fontSize: "0.9em" }}>
+                <div>
+                  <div style={{ color: "#6c757d" }}>Realized</div>
+                  <div style={{ 
+                    fontWeight: "bold",
+                    color: pnl.live.realized >= 0 ? "#28a745" : "#dc3545"
+                  }}>
+                    ₹{pnl.live.realized.toLocaleString()}
+                  </div>
+                </div>
+                <div>
+                  <div style={{ color: "#6c757d" }}>Unrealized</div>
+                  <div style={{ 
+                    fontWeight: "bold",
+                    color: pnl.live.unrealized >= 0 ? "#28a745" : "#dc3545"
+                  }}>
+                    ₹{pnl.live.unrealized.toLocaleString()}
+                  </div>
+                </div>
+                <div>
+                  <div style={{ color: "#6c757d" }}>Total</div>
+                  <div style={{ 
+                    fontWeight: "bold",
+                    color: pnl.live.total >= 0 ? "#28a745" : "#dc3545"
+                  }}>
+                    ₹{pnl.live.total.toLocaleString()}
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
       <div style={{ display: "flex", gap: 12, alignItems: "center", marginBottom: 12 }}>
         <button onClick={load} style={{ padding: "6px 10px" }}>{loading ? "Loading..." : "Refresh"}</button>
         <label>
@@ -183,6 +338,43 @@ export default function OrdersPage() {
         </tbody>
       </table>
       <div style={{ marginTop: 8, fontSize: 12 }}>Showing {filtered.length} of {orders.length} orders</div>
+
+      {/* Current Positions */}
+      {positions.length > 0 && (
+        <div style={{ marginTop: 24 }}>
+          <h3>Current Positions</h3>
+          <table style={{ width: "100%", borderCollapse: "collapse" }}>
+            <thead>
+              <tr>
+                <th style={{ textAlign: "left" }}>Symbol</th>
+                <th style={{ textAlign: "left" }}>Exchange</th>
+                <th style={{ textAlign: "right" }}>Quantity</th>
+                <th style={{ textAlign: "right" }}>Avg Price</th>
+                <th style={{ textAlign: "right" }}>LTP</th>
+                <th style={{ textAlign: "right" }}>Unrealized P&L</th>
+              </tr>
+            </thead>
+            <tbody>
+              {positions.map((pos, index) => (
+                <tr key={index}>
+                  <td>{pos.symbol}</td>
+                  <td>{pos.exchange}</td>
+                  <td style={{ textAlign: "right" }}>{pos.quantity}</td>
+                  <td style={{ textAlign: "right" }}>₹{pos.avg_price.toFixed(2)}</td>
+                  <td style={{ textAlign: "right" }}>₹{pos.ltp.toFixed(2)}</td>
+                  <td style={{ 
+                    textAlign: "right", 
+                    color: pos.unrealized >= 0 ? "#28a745" : "#dc3545",
+                    fontWeight: "bold"
+                  }}>
+                    ₹{pos.unrealized.toFixed(2)}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
 
       {demat.length > 0 && (
         <div style={{ marginTop: 24 }}>

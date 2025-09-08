@@ -32,6 +32,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
                   <summary>Options ▾</summary>
                   <div className="card menu menu-left">
                     <a href="/options-trading">Options Trading</a>
+                    <a href="/options-strategies">Options Strategies</a>
                     <a href="/options-builder">Strategy Builder</a>
                   </div>
                 </details>
@@ -40,6 +41,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
                 <details>
                   <summary>Trading ▾</summary>
                   <div className="card menu menu-left">
+                    <a href="/ai-trading">🤖 AI Trading</a>
                     <a href="/strategy-builder">Strategies</a>
                     <a href="/risk">Risk Management</a>
                     <a href="/orders">Orders</a>
